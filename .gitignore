@@ -1,0 +1,143 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo files
+Cargo.lock
+
+# IDE and editor files
+/.vscode/
+/.idea/
+*.swp
+*.swo
+*~
+.*.swp
+.DS_Store
+
+# OS generated files
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment and configuration files
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+config/local.*
+*.local.toml
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Log files
+*.log
+logs/
+*.log.*
+
+# Music and media files
+/music/
+/downloads/
+/cache/
+/temp/
+*.mp3
+*.flac
+*.ogg
+*.wav
+*.m4a
+*.aac
+*.wma
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+
+# Docker build cache
+/.docker_cache/
+
+# Test coverage
+/coverage/
+*.profraw
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+*.tmp
+
+# Runtime files
+*.pid
+*.seed
+*.pid.lock
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Visual Studio Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Vim
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+
+# Application specific
+/data/
+/storage/
+/uploads/
+/public/music/
+/public/downloads/
+
+# Generated documentation
+/doc/
+/docs/build/
+
+# Rust analyzer
+/rust-project.json
+
+# Benchmark results
+/criterion/
