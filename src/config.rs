@@ -80,11 +80,11 @@ pub struct NavidromeConfig {
     /// Navidrome server URL
     pub url: String,
 
-    /// Admin username for Navidrome
-    pub admin_user: String,
+    /// Username for Navidrome
+    pub username: String,
 
-    /// Admin password for Navidrome
-    pub admin_password: String,
+    /// Password for Navidrome
+    pub password: String,
 
     /// API timeout in seconds
     #[serde(default = "default_api_timeout")]
@@ -385,12 +385,12 @@ impl Config {
     }
 
     /// Get Navidrome admin credentials
-    pub fn navidrome_admin_user(&self) -> &str {
-        &self.navidrome.admin_user
+    pub fn navidrome_username(&self) -> &str {
+        &self.navidrome.username
     }
 
-    pub fn navidrome_admin_password(&self) -> &str {
-        &self.navidrome.admin_password
+    pub fn navidrome_password(&self) -> &str {
+        &self.navidrome.password
     }
 
     /// Get ListenBrainz URL

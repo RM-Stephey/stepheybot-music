@@ -351,7 +351,8 @@ impl LidarrClient {
             .await
             .context("Failed to add artist")?;
 
-        if response.status().is_success() {
+        let status = response.status();
+        if status.is_success() {
             let added_artist: Artist = response
                 .json()
                 .await
@@ -364,7 +365,7 @@ impl LidarrClient {
             anyhow::bail!(
                 "Failed to add artist {}: {} - {}",
                 artist.artist_name,
-                response.status(),
+                status,
                 error_text
             );
         }

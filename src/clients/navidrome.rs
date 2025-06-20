@@ -336,7 +336,10 @@ impl NavidromeClient {
         let response = self.make_request("ping", &[]).await?;
 
         if response.subsonic_response.status != "ok" {
-            anyhow::bail!("Navidrome health check failed: {:?}", response.subsonic_response.error);
+            anyhow::bail!(
+                "Navidrome health check failed: {:?}",
+                response.subsonic_response.error
+            );
         }
 
         Ok(())
@@ -360,7 +363,8 @@ impl NavidromeClient {
 
     /// Get all artists
     pub async fn get_artists(&self) -> Result<Vec<NavidromeArtist>> {
-        let response: SubsonicResponse<ArtistsResponse> = self.make_request("getArtists", &[]).await?;
+        let response: SubsonicResponse<ArtistsResponse> =
+            self.make_request("getArtists", &[]).await?;
 
         match response.subsonic_response.data {
             Some(data) => {
@@ -377,11 +381,15 @@ impl NavidromeClient {
     /// Get artist information by ID
     pub async fn get_artist(&self, artist_id: &str) -> Result<Option<NavidromeArtist>> {
         let params = [("id", artist_id)];
-        let response: SubsonicResponse<ArtistsResponse> = self.make_request("getArtist", &params).await?;
+        let response: SubsonicResponse<ArtistsResponse> =
+            self.make_request("getArtist", &params).await?;
 
         // Note: This is a simplification - the actual getArtist response structure may differ
         match response.subsonic_response.data {
-            Some(data) => Ok(data.artists.index.into_iter()
+            Some(data) => Ok(data
+                .artists
+                .index
+                .into_iter()
                 .flat_map(|idx| idx.artist)
                 .find(|a| a.id == artist_id)),
             None => Ok(None),
@@ -389,20 +397,28 @@ impl NavidromeClient {
     }
 
     /// Get albums with optional filtering
-    pub async fn get_albums(&self, album_type: Option<&str>, size: Option<u32>, offset: Option<u32>) -> Result<Vec<NavidromeAlbum>> {
+    pub async fn get_albums(
+        &self,
+        album_type: Option<&str>,
+        size: Option<u32>,
+        offset: Option<u32>,
+    ) -> Result<Vec<NavidromeAlbum>> {
         let mut params = Vec::new();
 
         if let Some(t) = album_type {
             params.push(("type", t));
         }
         if let Some(s) = size {
-            params.push(("size", &s.to_string()));
+            let s_str = s.to_string();
+            params.push(("size", &s_str));
         }
         if let Some(o) = offset {
-            params.push(("offset", &o.to_string()));
+            let o_str = o.to_string();
+            params.push(("offset", &o_str));
         }
 
-        let response: SubsonicResponse<AlbumsResponse> = self.make_request("getAlbumList2", &params).await?;
+        let response: SubsonicResponse<AlbumsResponse> =
+            self.make_request("getAlbumList2", &params).await?;
 
         match response.subsonic_response.data {
             Some(data) => Ok(data.album_list2.album),
@@ -416,23 +432,33 @@ impl NavidromeClient {
     }
 
     /// Get random songs
-    pub async fn get_random_songs(&self, size: Option<u32>, genre: Option<&str>, from_year: Option<u32>, to_year: Option<u32>) -> Result<Vec<NavidromeSong>> {
+    pub async fn get_random_songs(
+        &self,
+        size: Option<u32>,
+        genre: Option<&str>,
+        from_year: Option<u32>,
+        to_year: Option<u32>,
+    ) -> Result<Vec<NavidromeSong>> {
         let mut params = Vec::new();
 
         if let Some(s) = size {
-            params.push(("size", &s.to_string()));
+            let s_str = s.to_string();
+            params.push(("size", &s_str));
         }
         if let Some(g) = genre {
             params.push(("genre", g));
         }
         if let Some(fy) = from_year {
-            params.push(("fromYear", &fy.to_string()));
+            let fy_str = fy.to_string();
+            params.push(("fromYear", &fy_str));
         }
         if let Some(ty) = to_year {
-            params.push(("toYear", &ty.to_string()));
+            let ty_str = ty.to_string();
+            params.push(("toYear", &ty_str));
         }
 
-        let response: SubsonicResponse<SongsResponse> = self.make_request("getRandomSongs", &params).await?;
+        let response: SubsonicResponse<SongsResponse> =
+            self.make_request("getRandomSongs", &params).await?;
 
         match response.subsonic_response.data.and_then(|d| d.random_songs) {
             Some(random_songs) => Ok(random_songs.song),
@@ -441,22 +467,36 @@ impl NavidromeClient {
     }
 
     /// Search for music
-    pub async fn search(&self, query: &str, artist_count: Option<u32>, album_count: Option<u32>, song_count: Option<u32>) -> Result<SearchResult> {
+    pub async fn search(
+        &self,
+        query: &str,
+        artist_count: Option<u32>,
+        album_count: Option<u32>,
+        song_count: Option<u32>,
+    ) -> Result<SearchResult> {
         let mut params = vec![("query", query)];
 
         if let Some(ac) = artist_count {
-            params.push(("artistCount", &ac.to_string()));
+            let ac_str = ac.to_string();
+            params.push(("artistCount", &ac_str));
         }
         if let Some(alc) = album_count {
-            params.push(("albumCount", &alc.to_string()));
+            let alc_str = alc.to_string();
+            params.push(("albumCount", &alc_str));
         }
         if let Some(sc) = song_count {
-            params.push(("songCount", &sc.to_string()));
+            let sc_str = sc.to_string();
+            params.push(("songCount", &sc_str));
         }
 
-        let response: SubsonicResponse<SongsResponse> = self.make_request("search3", &params).await?;
+        let response: SubsonicResponse<SongsResponse> =
+            self.make_request("search3", &params).await?;
 
-        match response.subsonic_response.data.and_then(|d| d.search_result3) {
+        match response
+            .subsonic_response
+            .data
+            .and_then(|d| d.search_result3)
+        {
             Some(result) => Ok(result),
             None => Ok(SearchResult {
                 song: None,
@@ -473,7 +513,8 @@ impl NavidromeClient {
             params.push(("username", u));
         }
 
-        let response: SubsonicResponse<PlaylistsResponse> = self.make_request("getPlaylists", &params).await?;
+        let response: SubsonicResponse<PlaylistsResponse> =
+            self.make_request("getPlaylists", &params).await?;
 
         match response.subsonic_response.data {
             Some(data) => Ok(data.playlists.playlist),
@@ -482,7 +523,11 @@ impl NavidromeClient {
     }
 
     /// Create a new playlist
-    pub async fn create_playlist(&self, name: &str, song_ids: &[String]) -> Result<NavidromePlaylist> {
+    pub async fn create_playlist(
+        &self,
+        name: &str,
+        song_ids: &[String],
+    ) -> Result<NavidromePlaylist> {
         let mut params = vec![("name", name)];
 
         // Add song IDs as separate parameters
@@ -491,17 +536,30 @@ impl NavidromeClient {
             params.push(("songId", song_id));
         }
 
-        let response: SubsonicResponse<PlaylistsResponse> = self.make_request("createPlaylist", &params).await?;
+        let response: SubsonicResponse<PlaylistsResponse> =
+            self.make_request("createPlaylist", &params).await?;
 
         match response.subsonic_response.data {
-            Some(data) => data.playlists.playlist.into_iter().next()
+            Some(data) => data
+                .playlists
+                .playlist
+                .into_iter()
+                .next()
                 .ok_or_else(|| anyhow::anyhow!("Failed to create playlist")),
             None => Err(anyhow::anyhow!("Failed to create playlist")),
         }
     }
 
     /// Update an existing playlist
-    pub async fn update_playlist(&self, playlist_id: &str, name: Option<&str>, comment: Option<&str>, public: Option<bool>, song_ids_to_add: &[String], song_indices_to_remove: &[u32]) -> Result<()> {
+    pub async fn update_playlist(
+        &self,
+        playlist_id: &str,
+        name: Option<&str>,
+        comment: Option<&str>,
+        public: Option<bool>,
+        song_ids_to_add: &[String],
+        song_indices_to_remove: &[u32],
+    ) -> Result<()> {
         let mut params = vec![("playlistId", playlist_id)];
 
         if let Some(n) = name {
@@ -511,7 +569,7 @@ impl NavidromeClient {
             params.push(("comment", c));
         }
         if let Some(p) = public {
-            params.push(("public", if *p { "true" } else { "false" }));
+            params.push(("public", if p { "true" } else { "false" }));
         }
 
         // Add songs to add
@@ -520,22 +578,34 @@ impl NavidromeClient {
         }
 
         // Add song indices to remove
-        let index_strings: Vec<String> = song_indices_to_remove.iter().map(|i| i.to_string()).collect();
+        let index_strings: Vec<String> = song_indices_to_remove
+            .iter()
+            .map(|i| i.to_string())
+            .collect();
         for index_str in &index_strings {
             params.push(("songIndexToRemove", index_str));
         }
 
-        let response: SubsonicResponse<serde_json::Value> = self.make_request("updatePlaylist", &params).await?;
+        let response: SubsonicResponse<serde_json::Value> =
+            self.make_request("updatePlaylist", &params).await?;
 
         if response.subsonic_response.status != "ok" {
-            return Err(anyhow::anyhow!("Failed to update playlist: {:?}", response.subsonic_response.error));
+            return Err(anyhow::anyhow!(
+                "Failed to update playlist: {:?}",
+                response.subsonic_response.error
+            ));
         }
 
         Ok(())
     }
 
     /// Create or update playlist
-    pub async fn create_or_update_playlist(&self, user_id: &str, name: &str, song_ids: Vec<String>) -> Result<()> {
+    pub async fn create_or_update_playlist(
+        &self,
+        user_id: &str,
+        name: &str,
+        song_ids: Vec<String>,
+    ) -> Result<()> {
         // First, try to find existing playlist with this name
         let playlists = self.get_playlists(None).await?;
 
@@ -545,7 +615,15 @@ impl NavidromeClient {
             let existing_song_count = existing_playlist.song_count.unwrap_or(0);
             let indices_to_remove: Vec<u32> = (0..existing_song_count).collect();
 
-            self.update_playlist(&existing_playlist.id, None, None, None, &song_ids, &indices_to_remove).await?;
+            self.update_playlist(
+                &existing_playlist.id,
+                None,
+                None,
+                None,
+                &song_ids,
+                &indices_to_remove,
+            )
+            .await?;
         } else {
             // Create new playlist
             self.create_playlist(name, &song_ids).await?;
@@ -555,20 +633,29 @@ impl NavidromeClient {
     }
 
     /// Scrobble a song (mark as played)
-    pub async fn scrobble(&self, song_id: &str, time: Option<u64>, submission: Option<bool>) -> Result<()> {
+    pub async fn scrobble(
+        &self,
+        song_id: &str,
+        time: Option<u64>,
+        submission: Option<bool>,
+    ) -> Result<()> {
         let mut params = vec![("id", song_id)];
 
         if let Some(t) = time {
             params.push(("time", &t.to_string()));
         }
         if let Some(s) = submission {
-            params.push(("submission", if *s { "true" } else { "false" }));
+            params.push(("submission", if s { "true" } else { "false" }));
         }
 
-        let response: SubsonicResponse<serde_json::Value> = self.make_request("scrobble", &params).await?;
+        let response: SubsonicResponse<serde_json::Value> =
+            self.make_request("scrobble", &params).await?;
 
         if response.subsonic_response.status != "ok" {
-            return Err(anyhow::anyhow!("Failed to scrobble: {:?}", response.subsonic_response.error));
+            return Err(anyhow::anyhow!(
+                "Failed to scrobble: {:?}",
+                response.subsonic_response.error
+            ));
         }
 
         Ok(())
@@ -576,7 +663,8 @@ impl NavidromeClient {
 
     /// Get current playing information
     pub async fn get_now_playing(&self) -> Result<Vec<NowPlayingEntry>> {
-        let response: SubsonicResponse<NowPlayingResponse> = self.make_request("getNowPlaying", &[]).await?;
+        let response: SubsonicResponse<NowPlayingResponse> =
+            self.make_request("getNowPlaying", &[]).await?;
 
         match response.subsonic_response.data {
             Some(data) => Ok(data.now_playing.entry),
@@ -585,7 +673,11 @@ impl NavidromeClient {
     }
 
     /// Get recent plays for a user (this is a custom method, may not be available in all Subsonic implementations)
-    pub async fn get_recent_plays(&self, user_id: &str, since: DateTime<Utc>) -> Result<Vec<ScrobbleEntry>> {
+    pub async fn get_recent_plays(
+        &self,
+        user_id: &str,
+        since: DateTime<Utc>,
+    ) -> Result<Vec<ScrobbleEntry>> {
         // Note: This is a placeholder implementation as standard Subsonic API doesn't have this endpoint
         // You might need to implement this using database queries or custom Navidrome endpoints
         warn!("get_recent_plays is not implemented in standard Subsonic API");
@@ -593,7 +685,12 @@ impl NavidromeClient {
     }
 
     /// Star a song, album, or artist
-    pub async fn star(&self, song_id: Option<&str>, album_id: Option<&str>, artist_id: Option<&str>) -> Result<()> {
+    pub async fn star(
+        &self,
+        song_id: Option<&str>,
+        album_id: Option<&str>,
+        artist_id: Option<&str>,
+    ) -> Result<()> {
         let mut params = Vec::new();
 
         if let Some(id) = song_id {
@@ -606,17 +703,26 @@ impl NavidromeClient {
             params.push(("artistId", id));
         }
 
-        let response: SubsonicResponse<serde_json::Value> = self.make_request("star", &params).await?;
+        let response: SubsonicResponse<serde_json::Value> =
+            self.make_request("star", &params).await?;
 
         if response.subsonic_response.status != "ok" {
-            return Err(anyhow::anyhow!("Failed to star: {:?}", response.subsonic_response.error));
+            return Err(anyhow::anyhow!(
+                "Failed to star: {:?}",
+                response.subsonic_response.error
+            ));
         }
 
         Ok(())
     }
 
     /// Unstar a song, album, or artist
-    pub async fn unstar(&self, song_id: Option<&str>, album_id: Option<&str>, artist_id: Option<&str>) -> Result<()> {
+    pub async fn unstar(
+        &self,
+        song_id: Option<&str>,
+        album_id: Option<&str>,
+        artist_id: Option<&str>,
+    ) -> Result<()> {
         let mut params = Vec::new();
 
         if let Some(id) = song_id {
@@ -629,10 +735,14 @@ impl NavidromeClient {
             params.push(("artistId", id));
         }
 
-        let response: SubsonicResponse<serde_json::Value> = self.make_request("unstar", &params).await?;
+        let response: SubsonicResponse<serde_json::Value> =
+            self.make_request("unstar", &params).await?;
 
         if response.subsonic_response.status != "ok" {
-            return Err(anyhow::anyhow!("Failed to unstar: {:?}", response.subsonic_response.error));
+            return Err(anyhow::anyhow!(
+                "Failed to unstar: {:?}",
+                response.subsonic_response.error
+            ));
         }
 
         Ok(())
@@ -640,9 +750,14 @@ impl NavidromeClient {
 
     /// Get starred songs, albums, and artists
     pub async fn get_starred(&self) -> Result<SearchResult> {
-        let response: SubsonicResponse<SongsResponse> = self.make_request("getStarred2", &[]).await?;
+        let response: SubsonicResponse<SongsResponse> =
+            self.make_request("getStarred2", &[]).await?;
 
-        match response.subsonic_response.data.and_then(|d| d.search_result3) {
+        match response
+            .subsonic_response
+            .data
+            .and_then(|d| d.search_result3)
+        {
             Some(result) => Ok(result),
             None => Ok(SearchResult {
                 song: None,
@@ -659,17 +774,25 @@ impl NavidromeClient {
         }
 
         let params = [("id", song_id), ("rating", &rating.to_string())];
-        let response: SubsonicResponse<serde_json::Value> = self.make_request("setRating", &params).await?;
+        let response: SubsonicResponse<serde_json::Value> =
+            self.make_request("setRating", &params).await?;
 
         if response.subsonic_response.status != "ok" {
-            return Err(anyhow::anyhow!("Failed to set rating: {:?}", response.subsonic_response.error));
+            return Err(anyhow::anyhow!(
+                "Failed to set rating: {:?}",
+                response.subsonic_response.error
+            ));
         }
 
         Ok(())
     }
 
     /// Make a request to the Subsonic API with rate limiting
-    async fn make_request<T>(&self, method: &str, params: &[(&str, &str)]) -> Result<SubsonicResponse<T>>
+    async fn make_request<T>(
+        &self,
+        method: &str,
+        params: &[(&str, &str)],
+    ) -> Result<SubsonicResponse<T>>
     where
         T: for<'de> serde::Deserialize<'de>,
     {
@@ -706,7 +829,8 @@ impl NavidromeClient {
 
         debug!("Making Navidrome API request: {}", method);
 
-        let response = self.client
+        let response = self
+            .client
             .get(url)
             .send()
             .await

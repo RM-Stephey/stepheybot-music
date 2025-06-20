@@ -554,7 +554,7 @@ impl RecommendationService {
         let mut cache = HashMap::new();
 
         for track_pop in popular_tracks {
-            cache.insert(track_pop.track_id, track_pop.popularity_score());
+            cache.insert(track_pop.track_id.clone(), track_pop.popularity_score());
         }
 
         *self.popularity_cache.write().await = cache;

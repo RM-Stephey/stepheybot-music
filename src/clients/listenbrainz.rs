@@ -151,7 +151,8 @@ impl ListenBrainzClient {
             .await
             .context("Failed to submit listens")?;
 
-        if response.status().is_success() {
+        let status = response.status();
+        if status.is_success() {
             info!(
                 "Successfully submitted {} listens for user {}",
                 listens.len(),
@@ -160,11 +161,7 @@ impl ListenBrainzClient {
             Ok(())
         } else {
             let error_text = response.text().await.unwrap_or_default();
-            anyhow::bail!(
-                "Failed to submit listens: {} - {}",
-                response.status(),
-                error_text
-            );
+            anyhow::bail!("Failed to submit listens: {} - {}", status, error_text);
         }
     }
 

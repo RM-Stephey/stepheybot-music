@@ -3,16 +3,16 @@
 //! This module contains clients for interacting with various external music services
 //! including Navidrome, ListenBrainz, Lidarr, and MusicBrainz.
 
-pub mod navidrome;
-pub mod listenbrainz;
 pub mod lidarr;
+pub mod listenbrainz;
 pub mod musicbrainz;
+pub mod navidrome;
 
 // Re-export for convenience
-pub use navidrome::NavidromeClient;
-pub use listenbrainz::ListenBrainzClient;
 pub use lidarr::LidarrClient;
+pub use listenbrainz::ListenBrainzClient;
 pub use musicbrainz::MusicBrainzClient;
+pub use navidrome::NavidromeClient;
 
 use anyhow::Result;
 use std::time::Duration;
@@ -107,12 +107,9 @@ impl Default for RetryConfig {
 }
 
 /// Retry logic for API requests
-pub async fn retry_with_backoff<F, T, E>(
-    operation: F,
-    config: &RetryConfig,
-) -> Result<T, E>
+pub async fn retry_with_backoff<F, T, E>(operation: F, config: &RetryConfig) -> Result<T, E>
 where
-    F: Fn() -> futures::future::BoxFuture<'_, Result<T, E>>,
+    F: Fn() -> futures::future::BoxFuture<'static, Result<T, E>>,
     E: std::fmt::Debug,
 {
     let mut attempt = 0;

@@ -6,11 +6,41 @@
 use anyhow::{Context, Result};
 use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
-    SqlitePool, Row,
+    Row, SqlitePool,
 };
 use std::{path::Path, str::FromStr, time::Duration};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+
+/// Initialize database connection and run migrations
+pub async fn init_db(database_url: &str) -> Result<SqlitePool> {
+    info!("Initializing database: {}", database_url);
+
+    // Parse connection options
+    let connect_options = SqliteConnectOptions::from_str(database_url)?
+        .create_if_missing(true)
+        .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+        .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
+        .busy_timeout(Duration::from_secs(30))
+        .pragma("cache_size", "-64000") // 64MB cache
+        .pragma("temp_store", "memory")
+        .pragma("mmap_size", "268435456") // 256MB mmap
+        .pragma("optimize", "0x10002"); // Enable query planner optimizations
+
+    // Create connection pool
+    let pool = SqlitePoolOptions::new()
+        .max_connections(10)
+        .min_connections(1)
+        .acquire_timeout(Duration::from_secs(30))
+        .idle_timeout(Duration::from_secs(600))
+        .max_lifetime(Duration::from_secs(1800))
+        .connect_with(connect_options)
+        .await
+        .context("Failed to create database pool")?;
+
+    info!("Database pool created successfully");
+    Ok(pool)
+}
 
 /// Database connection pool and management
 #[derive(Clone)]
@@ -118,7 +148,7 @@ impl Database {
 
         // Clean up old listening history
         let listening_history_deleted = sqlx::query(
-            "DELETE FROM listening_history WHERE created_at < datetime('now', '-' || ? || ' days')"
+            "DELETE FROM listening_history WHERE created_at < datetime('now', '-' || ? || ' days')",
         )
         .bind(retention_days)
         .execute(&mut *tx)
@@ -127,7 +157,7 @@ impl Database {
 
         // Clean up old recommendations
         let recommendations_deleted = sqlx::query(
-            "DELETE FROM recommendations WHERE created_at < datetime('now', '-' || ? || ' days')"
+            "DELETE FROM recommendations WHERE created_at < datetime('now', '-' || ? || ' days')",
         )
         .bind(retention_days)
         .execute(&mut *tx)
@@ -140,7 +170,7 @@ impl Database {
             DELETE FROM playlist_tracks
             WHERE playlist_id NOT IN (SELECT id FROM playlists)
             OR track_id NOT IN (SELECT id FROM tracks)
-            "#
+            "#,
         )
         .execute(&mut *tx)
         .await?
@@ -153,7 +183,7 @@ impl Database {
             WHERE id NOT IN (
                 SELECT DISTINCT track_id FROM playlist_tracks
             ) AND file_path IS NULL
-            "#
+            "#,
         )
         .execute(&mut *tx)
         .await?
@@ -207,7 +237,7 @@ impl Database {
                 freelist_count * page_size as free_size,
                 (page_count - freelist_count) * page_size as used_size
             FROM pragma_page_count(), pragma_page_size(), pragma_freelist_count()
-            "#
+            "#,
         )
         .fetch_one(&self.pool)
         .await?;
@@ -221,13 +251,16 @@ impl Database {
 
     /// Create a new database transaction
     pub async fn begin_transaction(&self) -> Result<sqlx::Transaction<'_, sqlx::Sqlite>> {
-        self.pool.begin().await.context("Failed to begin transaction")
+        self.pool
+            .begin()
+            .await
+            .context("Failed to begin transaction")
     }
 
     /// Execute a query with retries for handling busy database
     pub async fn execute_with_retry<F, T>(&self, operation: F) -> Result<T>
     where
-        F: Fn() -> futures::future::BoxFuture<'_, Result<T>> + Send + Sync,
+        F: Fn() -> futures::future::BoxFuture<'static, Result<T>> + Send + Sync,
         T: Send,
     {
         let mut attempts = 0;
@@ -248,7 +281,10 @@ impl Database {
                             sqlx::Error::Database(db_err) if db_err.code() == Some("5".into()) => {
                                 // SQLite busy error, retry with exponential backoff
                                 let delay = Duration::from_millis(100 * (2_u64.pow(attempts - 1)));
-                                warn!("Database busy, retrying in {:?} (attempt {}/{})", delay, attempts, max_attempts);
+                                warn!(
+                                    "Database busy, retrying in {:?} (attempt {}/{})",
+                                    delay, attempts, max_attempts
+                                );
                                 tokio::time::sleep(delay).await;
                                 continue;
                             }
@@ -339,7 +375,11 @@ pub mod utils {
 
     /// Create a database backup
     pub async fn backup_database(source_path: &Path, backup_path: &Path) -> Result<()> {
-        info!("Creating database backup: {} -> {}", source_path.display(), backup_path.display());
+        info!(
+            "Creating database backup: {} -> {}",
+            source_path.display(),
+            backup_path.display()
+        );
 
         if let Some(parent) = backup_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -353,7 +393,11 @@ pub mod utils {
 
     /// Restore database from backup
     pub async fn restore_database(backup_path: &Path, target_path: &Path) -> Result<()> {
-        info!("Restoring database from backup: {} -> {}", backup_path.display(), target_path.display());
+        info!(
+            "Restoring database from backup: {} -> {}",
+            backup_path.display(),
+            target_path.display()
+        );
 
         if let Some(parent) = target_path.parent() {
             tokio::fs::create_dir_all(parent).await?;
