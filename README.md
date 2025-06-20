@@ -123,6 +123,31 @@ model = "collaborative_filtering"
 update_interval = "24h"
 ```
 
+## 📚 Documentation
+
+Complete project documentation is available in the [`docs/`](docs/) directory:
+
+### 📖 Core Documentation
+- **[Project Overview](docs/README.md)** - Comprehensive project documentation
+- **[Development Guide](docs/setup/development.md)** - Setup and development environment
+- **[API Reference](docs/api/endpoints.md)** - Complete API documentation with examples
+
+### 🏗️ Technical Documentation  
+- **[System Architecture](docs/architecture/overview.md)** - Architecture and design decisions
+- **[Database Schema](docs/architecture/database.md)** - Data models and relationships
+- **[Recommendation Algorithms](docs/architecture/recommendations.md)** - AI recommendation details
+
+### 📈 Project Management
+- **[Changelog](docs/progress/changelog.md)** - Version history and updates
+- **[Roadmap](docs/progress/roadmap.md)** - Feature roadmap and timeline
+- **[Contributing](docs/development/contributing.md)** - Contribution guidelines
+
+### 🚀 Quick Links
+- **API Status**: `GET /api/v1/status` - Service information
+- **Health Check**: `GET /health` - Service health
+- **Get Recommendations**: `GET /api/v1/recommendations/{user_id}` - Personalized music
+- **Library Stats**: `GET /api/v1/library/stats` - Music library statistics
+
 ## 📡 API Endpoints
 
 ### Health & Status
