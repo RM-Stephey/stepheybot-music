@@ -13,7 +13,7 @@ StepheyBot Music is a self-hosted, privacy-focused music streaming platform that
 
 - 🎶 **Smart Music Recommendations** - AI-powered suggestions based on your listening habits
 - 🎵 **Personal Music Library** - Stream from your own collection with metadata enrichment
-- 📱 **Modern Web Interface** - Responsive design with neon-themed customization
+- 📱 **Neon-Themed Web Interface** - Beautiful Svelte frontend with cyberpunk aesthetics (cyan, pink, purple neon effects)
 - 🔒 **Privacy First** - Your data stays on your server
 - 🐳 **Docker Ready** - Easy deployment with multi-architecture support
 - 🎧 **Navidrome Integration** - Seamless compatibility with existing setups
@@ -24,15 +24,29 @@ StepheyBot Music is a self-hosted, privacy-focused music streaming platform that
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Web Client    │───▶│  StepheyBot     │───▶│   Navidrome     │
-│  (React/Vue)    │    │     Music       │    │ (Music Server)  │
-└─────────────────┘    │   (Rust API)    │    └─────────────────┘
-                       └─────────────────┘
+│  Neon Frontend  │───▶│  StepheyBot     │───▶│   Navidrome     │
+│   (Svelte 4)    │    │  Music (Rust)   │    │ (Music Server)  │
+│  Port: 5173     │    │  Port: 8083     │    │   Port: 4533    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
                                 │
                        ┌─────────────────┐    ┌─────────────────┐
                        │    Database     │    │     Lidarr      │
                        │   (SQLite)      │    │ (Music Manager) │
                        └─────────────────┘    └─────────────────┘
+```
+</end_text>
+
+<old_text>
+### From Source
+
+```bash
+# Prerequisites: Rust 1.80+, SQLite
+git clone https://github.com/stephey/stepheybot-music.git
+cd stepheybot-music
+
+# Build and run
+cargo build --release
+./target/release/stepheybot-music
 ```
 
 ## 🚀 Quick Start
@@ -171,6 +185,7 @@ Complete project documentation is available in the [`docs/`](docs/) directory:
 ### Prerequisites
 
 - Rust 1.80+
+- Node.js 18+ and npm
 - SQLite 3.x
 - Docker (optional)
 
@@ -178,17 +193,30 @@ Complete project documentation is available in the [`docs/`](docs/) directory:
 
 ```bash
 # Clone and setup
-git clone https://github.com/stephey/stepheybot-music.git
+git clone https://github.com/RM-Stephey/stepheybot-music.git
 cd stepheybot-music
 
-# Install dependencies
-cargo build
+# Run comprehensive system test
+./test-system.sh
 
-# Run database migrations
-cargo run -- migrate
+# Start development environment (both backend + frontend)
+./start-dev.sh
 
-# Start development server
+# Access the application:
+# - Backend API: http://localhost:8083
+# - Frontend UI: http://localhost:5173
+```
+
+### Individual Components
+
+```bash
+# Backend only
 cargo run
+
+# Frontend only
+cd frontend
+npm install --legacy-peer-deps
+npm run dev
 ```
 
 ### Testing
@@ -214,22 +242,36 @@ docker build -t stepheybot-music:dev .
 docker run -v $(pwd):/app stepheybot-music:dev
 ```
 
-## 🎨 Customization
+## 🎨 Neon-Themed Interface
 
-StepheyBot Music supports extensive theming and customization:
+StepheyBot Music features a stunning cyberpunk aesthetic designed for tech enthusiasts:
 
-### Neon Theme
-Perfect for users who love techno aesthetics with neon pinks, blues, and purples.
+### 🌟 Visual Features
+- **Neon Color Palette**: Electric cyan (#00FFFF), hot pink (#FF00FF), deep purple (#8000FF)
+- **Glowing Effects**: Animated borders, pulsing elements, and shadow effects
+- **Dark Gradient Backgrounds**: Smooth transitions from black to deep blue/purple
+- **Futuristic Typography**: Orbitron and Rajdhani fonts with text glow effects
+- **Smooth Animations**: Hover effects, loading states, and transitions
+
+### 🎨 Theme Configuration
 
 ```css
-/* Example theme variables */
+/* Built-in neon theme variables */
 :root {
-  --primary-neon: #ff0080;
-  --secondary-neon: #00ffff;
-  --accent-purple: #8000ff;
-  --bg-dark: #0a0a0a;
+  --neon-cyan: #00FFFF;
+  --neon-pink: #FF00FF;
+  --neon-purple: #8000FF;
+  --bg-primary: #0A0A0F;
+  --bg-secondary: #1A1A2E;
+  --shadow-neon: 0 0 20px var(--neon-cyan);
 }
 ```
+
+### 📱 Responsive Design
+- Mobile-first approach with touch-friendly controls
+- Adaptive layouts for desktop, tablet, and mobile
+- High contrast mode support for accessibility
+- Reduced motion support for users with vestibular disorders
 
 ### Custom Recommendation Algorithms
 
@@ -332,13 +374,26 @@ make check
 
 ## 📋 Roadmap
 
-- [ ] **Music Discovery Engine** - Advanced recommendation algorithms
-- [ ] **Social Features** - Share playlists and recommendations
-- [ ] **Mobile App** - Native iOS/Android applications
+### ✅ Completed (v0.1.0)
+- [x] **Rust Backend API** - Complete REST API with health checks
+- [x] **SQLite Database** - Normalized schema with sample data
+- [x] **Neon-Themed Frontend** - Beautiful Svelte interface with cyberpunk aesthetics
+- [x] **Docker Support** - Production-ready containerization
+- [x] **Basic Recommendations** - Foundation for AI-powered suggestions
+- [x] **Development Tools** - Test scripts and startup automation
+
+### 🚧 In Progress (v0.2.0)
+- [ ] **Enhanced Recommendation Engine** - Machine learning algorithms
+- [ ] **Music Player Component** - Integrated audio playback
+- [ ] **Real-time Updates** - WebSocket integration
+- [ ] **Navidrome Integration** - Complete music server connectivity
+
+### 📅 Planned (v0.3.0+)
 - [ ] **Voice Control** - "StepheyBot, play something energetic"
-- [ ] **Smart Home Integration** - Home Assistant, Alexa, Google Home
+- [ ] **Mobile PWA** - Progressive web app for mobile devices  
+- [ ] **Smart Home Integration** - Home Assistant compatibility
+- [ ] **Social Features** - Share playlists and recommendations
 - [ ] **Advanced Analytics** - Machine learning insights
-- [ ] **Plugin System** - Custom extensions and integrations
 - [ ] **Multi-user Support** - Family and shared accounts
 
 ## 🔧 Troubleshooting
@@ -389,7 +444,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - 🐛 **Bug Reports**: [GitHub Issues](https://github.com/stephey/stepheybot-music/issues)
 - 💬 **Discussions**: [GitHub Discussions](https://github.com/stephey/stepheybot-music/discussions)
 - 📧 **Email**: stephey@stepheybot.dev
-- 🗨️ **Discord**: [StepheyBot Community](https://discord.gg/stepheybot)
+- 🐙 **GitHub**: [RM-Stephey/stepheybot-music](https://github.com/RM-Stephey/stepheybot-music)
 
 ---
 

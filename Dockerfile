@@ -4,7 +4,7 @@
 # Build stage
 FROM rust:latest as builder
 
-# Install build dependencies
+# Install build dependencies including Node.js for frontend
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
@@ -16,7 +16,12 @@ RUN apt-get update && apt-get install -y \
     libswresample-dev \
     libclang-dev \
     cmake \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 18.x
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs
 
 # Create app user
 RUN useradd -m -u 1001 stepheybot
@@ -42,6 +47,15 @@ RUN touch src/main.rs && cargo build --release
 
 # Strip the binary to reduce size
 RUN strip target/release/stepheybot-music
+
+# Build frontend
+COPY frontend/ ./frontend/
+WORKDIR /app/frontend
+RUN npm install --legacy-peer-deps
+RUN npm run build
+
+# Return to app directory
+WORKDIR /app
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -71,6 +85,9 @@ WORKDIR /app
 # Copy the built binary from builder stage
 COPY --from=builder /app/target/release/stepheybot-music /app/stepheybot-music
 COPY --from=builder /app/migrations /app/migrations
+
+# Copy the built frontend files
+COPY --from=builder /app/frontend/build /app/frontend
 
 # Copy configuration files if they exist (optional)
 # COPY config/ ./config/

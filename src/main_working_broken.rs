@@ -3,6 +3,8 @@
 //! A working music recommendation service with SQLite database,
 //! mock data generation, and real API endpoints.
 
+mod navidrome_addon;
+
 use anyhow::{Context, Result};
 use axum::{
     extract::{Path, Query, State},
@@ -11,13 +13,15 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{sqlite::SqlitePool, Row};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tower::ServiceBuilder;
 use tower_http::{compression::CompressionLayer, cors::CorsLayer, trace::TraceLayer};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
+use navidrome_addon::{create_navidrome_addon, get_connection_status, test_navidrome_integration};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
 use rand::Rng;
@@ -465,6 +469,10 @@ async fn create_router(state: AppState) -> Result<Router> {
         // User endpoints
         .route("/api/v1/users", get(list_users))
         .route("/api/v1/users/:user_id/history", get(get_user_history))
+        // Navidrome integration endpoints
+        .route("/api/v1/navidrome/status", get(navidrome_status))
+        .route("/api/v1/navidrome/test", get(navidrome_test))
+        .route("/api/v1/navidrome/stats", get(navidrome_stats))
         // Admin endpoints
         .route("/admin/system", get(system_info))
         .route("/admin/database", get(database_info))
@@ -1241,6 +1249,36 @@ async fn get_user_history(
             error!("Failed to get user history: {}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
+    }
+}
+
+/// Get Navidrome connection status
+async fn navidrome_status() -> Result<Json<Value>, StatusCode> {
+    let status = get_connection_status().await;
+    Ok(Json(status))
+}
+
+/// Test Navidrome integration
+async fn navidrome_test() -> Result<Json<Value>, StatusCode> {
+    let test_result = test_navidrome_integration().await;
+    Ok(Json(test_result))
+}
+
+/// Get Navidrome library statistics
+async fn navidrome_stats() -> Result<Json<Value>, StatusCode> {
+    let addon = create_navidrome_addon();
+
+    match addon.get_library_stats().await {
+        Ok(stats) => Ok(Json(json!({
+            "success": true,
+            "stats": stats,
+            "timestamp": chrono::Utc::now()
+        }))),
+        Err(e) => Ok(Json(json!({
+            "success": false,
+            "error": e,
+            "timestamp": chrono::Utc::now()
+        })))
     }
 }
 

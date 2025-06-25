@@ -38,8 +38,10 @@ StepheyBot Music is designed as a microservice-oriented, containerized music rec
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────┐  │
 │  │   Web Client    │    │  Mobile Client  │    │  API Client │  │
-│  │  (React/Vue)    │    │    (Flutter)    │    │   (Rust)    │  │
+│  │    (Svelte)     │    │    (Flutter)    │    │   (Rust)    │  │
 │  └─────────────────┘    └─────────────────┘    └─────────────┘  │
+</thinking>
+
 ├─────────────────────────────────────────────────────────────────┤
 │                        API Gateway                              │
 │                    (Nginx/Traefik)                             │
@@ -74,7 +76,7 @@ StepheyBot Music is designed as a microservice-oriented, containerized music rec
 ### Architecture Layers
 
 #### 1. **Presentation Layer**
-- **Web Client**: React/Vue SPA with neon theme
+- **Web Client**: Svelte SPA with neon theme and smooth animations
 - **Mobile Client**: Flutter cross-platform application
 - **API Client**: Rust SDK for programmatic access
 

@@ -51,7 +51,7 @@ Create the ultimate personalized music experience that combines the convenience 
 ### 🚧 In Progress
 
 - **Web Interface** (v0.2.0) - Starting Next
-  - 🎨 Neon-themed React/Vue frontend
+  - 🎨 Neon-themed Svelte frontend with smooth animations
   - 📱 Responsive design for all devices
   - 🎵 Real-time music player integration
   - ⚡ Hot-reload development environment
@@ -75,7 +75,7 @@ Create the ultimate personalized music experience that combines the convenience 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Web Client    │───▶│  StepheyBot     │───▶│   Navidrome     │
-│ (React/Neon UI) │    │  Music API      │    │ (Music Server)  │
+│ (Svelte/Neon UI)│    │  Music API      │    │ (Music Server)  │
 │                 │    │   (Rust)        │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
                                 │
@@ -88,7 +88,7 @@ Create the ultimate personalized music experience that combines the convenience 
 ### Technology Stack
 
 - **Backend**: Rust + Axum + SQLx + SQLite
-- **Frontend**: React/Vue + TypeScript + Tailwind CSS
+- **Frontend**: Svelte + TypeScript + Tailwind CSS
 - **Database**: SQLite with performance optimizations
 - **Containerization**: Docker with multi-stage builds
 - **Integration**: Navidrome API, Lidarr API, MusicBrainz
@@ -182,11 +182,11 @@ curl http://localhost:8083/api/v1/library/stats
 - [x] Documentation foundation
 
 ### Phase 2: Web Interface 🚧 IN PROGRESS
-- [ ] React/Vue frontend setup
-- [ ] Neon theme implementation
-- [ ] Music player component
-- [ ] Recommendation UI
-- [ ] Library browser
+- [ ] Svelte frontend setup with SvelteKit
+- [ ] Neon theme implementation with CSS animations
+- [ ] Interactive music player component
+- [ ] Real-time recommendation UI
+- [ ] Dynamic library browser
 - [ ] User management interface
 
 ### Phase 3: Integration 📋 PLANNED
@@ -203,13 +203,13 @@ curl http://localhost:8083/api/v1/library/stats
 - [ ] Mobile application
 - [ ] Multi-user support
 
-## 🎨 Design Philosophy
+### Design Philosophy
 
 ### User Experience
 - **Immediate Functionality**: Everything should work out of the box
 - **Progressive Enhancement**: Add complexity gradually as needed
-- **Visual Appeal**: Neon aesthetics with smooth animations
-- **Performance First**: Fast, responsive, and efficient
+- **Visual Appeal**: Neon aesthetics with Svelte's smooth animations
+- **Performance First**: Fast, responsive, and efficient (Svelte's compile-time optimizations)
 
 ### Technical Principles
 - **Type Safety**: Rust's type system prevents runtime errors
