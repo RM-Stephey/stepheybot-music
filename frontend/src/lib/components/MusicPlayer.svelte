@@ -1,5 +1,6 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
+	import { musicPlayerStore } from '$lib/stores/musicPlayer.js';
 	import { writable } from 'svelte/store';
 
 	// Player state
@@ -39,7 +40,35 @@
 		} else {
 			console.warn('⚠️ MusicPlayer: Audio element not available on mount');
 		}
+
+		// Update store with current player state
+		updateStoreState();
 	});
+
+	// Function to update the store with current player state
+	function updateStoreState() {
+		musicPlayerStore.update(store => ({
+			...store,
+			currentTrack,
+			isPlaying,
+			currentTime,
+			duration,
+			volume,
+			queue,
+			currentIndex,
+			isLoading,
+			// Add methods that FloatingPlayer can call
+			togglePlayPause,
+			nextTrack,
+			previousTrack,
+			playTrackFromParent,
+			addTrackToQueue,
+			setQueue
+		}));
+	}
+
+	// Reactive statements to update store when key state changes
+	$: if (mounted) updateStoreState();
 
 	onDestroy(() => {
 		if (audio) {
@@ -66,13 +95,15 @@
 	}
 
 	function handleTimeUpdate() {
-		if (!progressDragging) {
-			currentTime = audio.currentTime || 0;
+		if (audio && !progressDragging) {
+			currentTime = audio.currentTime;
+			updateStoreState();
 		}
 	}
 
 	function handleTrackEnded() {
 		nextTrack();
+		updateStoreState();
 	}
 
 	function handleError(e) {
@@ -86,6 +117,7 @@
 	// Player controls
 	async function togglePlayPause() {
 		console.log('⏯️ MusicPlayer: togglePlayPause called, isPlaying:', isPlaying, 'currentTrack:', currentTrack);
+
 		if (!currentTrack) {
 			console.warn('⚠️ MusicPlayer: No current track to toggle');
 			return;
@@ -94,8 +126,9 @@
 		if (isPlaying) {
 			await pauseTrack();
 		} else {
-			await playTrack();
+			await playTrack(currentTrack);
 		}
+		updateStoreState();
 	}
 
 	async function playTrack(track = null) {
@@ -130,6 +163,7 @@
 			isPlaying = false;
 		} finally {
 			isLoading = false;
+			updateStoreState();
 		}
 	}
 
@@ -140,6 +174,7 @@
 
 			// Update backend
 			await fetch('/api/v1/player/pause', { method: 'POST' });
+			updateStoreState();
 		}
 	}
 
@@ -155,7 +190,8 @@
 		const track = queue[currentIndex];
 		if (track) {
 			await playTrack(track);
-			await fetch('/api/v1/player/next', { method: 'POST' });
+			await fetch('/api/v1/player/previous', { method: 'POST' });
+			updateStoreState();
 		}
 	}
 
@@ -181,6 +217,7 @@
 	function addToQueue(track) {
 		queue = [...queue, track];
 		updateQueue();
+		updateStoreState();
 	}
 
 	function removeFromQueue(index) {

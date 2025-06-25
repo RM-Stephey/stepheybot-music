@@ -242,6 +242,31 @@ impl NavidromeAddon {
         }
     }
 
+    /// Search for tracks in Navidrome library
+    pub async fn search_tracks(&self, query: &str) -> Result<Vec<SimpleTrack>, String> {
+        if !self.enabled {
+            return Err("Navidrome not configured".to_string());
+        }
+
+        // For now, return a subset of random tracks that match the query
+        // In a full implementation, this would use Navidrome's search API
+        match self.get_random_tracks(20).await {
+            Ok(tracks) => {
+                let query_lower = query.to_lowercase();
+                let filtered_tracks: Vec<SimpleTrack> = tracks
+                    .into_iter()
+                    .filter(|track| {
+                        track.title.to_lowercase().contains(&query_lower)
+                            || track.artist.to_lowercase().contains(&query_lower)
+                            || track.album.to_lowercase().contains(&query_lower)
+                    })
+                    .collect();
+                Ok(filtered_tracks)
+            }
+            Err(e) => Err(format!("Search failed: {}", e)),
+        }
+    }
+
     /// Create a simple status report
     pub async fn get_status(&self) -> serde_json::Value {
         let info = self.test_connection().await;

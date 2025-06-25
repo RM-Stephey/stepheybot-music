@@ -415,6 +415,32 @@ impl LidarrAddon {
         }))
     }
 
+    /// Simplified method to add artist to monitoring with default settings
+    pub async fn add_artist_to_monitoring(
+        &self,
+        artist_name: &str,
+        foreign_artist_id: &str,
+    ) -> Result<LidarrArtist, String> {
+        if !self.enabled {
+            return Err("Lidarr not configured".to_string());
+        }
+
+        // Create a mock LidarrSearchResult for the existing add_artist method
+        let search_result = LidarrSearchResult {
+            foreign_artist_id: foreign_artist_id.to_string(),
+            artist_name: artist_name.to_string(),
+            overview: None,
+            disambiguation: None,
+            images: None,
+            links: None,
+            genres: None,
+            ratings: None,
+        };
+
+        // Use default values for the full add_artist method
+        self.add_artist(&search_result, 1, 1, "/music").await
+    }
+
     /// Create a status report
     pub async fn get_status(&self) -> serde_json::Value {
         let info = self.test_connection().await;

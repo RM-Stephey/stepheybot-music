@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 	import MusicPlayer from '$lib/components/MusicPlayer.svelte';
+	import FloatingPlayer from '$lib/components/FloatingPlayer.svelte';
 	import { setMusicPlayer } from '$lib/stores/musicPlayer.js';
 
 	let mounted = false;
@@ -28,8 +29,9 @@
 	// Navigation items
 	const navItems = [
 		{ href: '/', label: 'Dashboard', icon: '🏠' },
+		{ href: '/search', label: 'Search', icon: '🔍' },
+		{ href: '/discover', label: 'Discover', icon: '🎲' },
 		{ href: '/recommendations', label: 'Recommendations', icon: '🎵' },
-		{ href: '/discover', label: 'Discover', icon: '🔍' },
 		{ href: '/playlists', label: 'Playlists', icon: '📝' },
 		{ href: '/library', label: 'Library', icon: '📚' },
 		{ href: '/stats', label: 'Stats', icon: '📊' }
@@ -119,8 +121,13 @@
 		</div>
 	</footer>
 
-	<!-- Music Player -->
-	<MusicPlayer bind:this={musicPlayer} />
+	<!-- Floating Music Player -->
+	<FloatingPlayer {musicPlayer} />
+
+	<!-- Hidden Music Player for functionality -->
+	<div style="display: none;">
+		<MusicPlayer bind:this={musicPlayer} />
+	</div>
 </div>
 
 <style>
@@ -381,6 +388,22 @@
 			gap: var(--spacing-md);
 		}
 
+		.brand-title {
+			font-size: 1.2rem;
+		}
+
+		.brand-icon {
+			font-size: 1.5rem;
+		}
+
+		.brand-text {
+			font-size: 1.2rem;
+		}
+
+		.brand-subtitle {
+			font-size: 0.8rem;
+		}
+
 		.nav-list {
 			flex-wrap: wrap;
 			justify-content: center;
@@ -411,8 +434,29 @@
 		}
 
 		.footer-links {
-			flex-wrap: wrap;
 			justify-content: center;
+		}
+	}
+
+	@media (max-width: 480px) {
+		.brand-title {
+			font-size: 1rem;
+		}
+
+		.brand-icon {
+			font-size: 1.2rem;
+		}
+
+		.brand-text {
+			font-size: 1rem;
+		}
+
+		.brand-subtitle {
+			font-size: 0.7rem;
+		}
+
+		.header-content {
+			padding: var(--spacing-sm) 0;
 		}
 	}
 

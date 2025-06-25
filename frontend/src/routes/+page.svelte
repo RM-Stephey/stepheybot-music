@@ -884,14 +884,23 @@
 
 	/* Responsive Design */
 	@media (max-width: 768px) {
+		.container {
+			padding: 0 var(--spacing-sm);
+		}
+
 		.hero {
 			flex-direction: column;
 			text-align: center;
 			gap: var(--spacing-lg);
+			padding: var(--spacing-md);
 		}
 
 		.hero-title {
-			font-size: 2.5rem;
+			font-size: 2rem;
+			line-height: 1.2;
+			word-wrap: break-word;
+			hyphens: auto;
+			overflow-wrap: break-word;
 		}
 
 		.hero-visual {
@@ -909,25 +918,102 @@
 			text-align: center;
 		}
 
+		.section-header h2 {
+			font-size: 1.5rem;
+			word-wrap: break-word;
+		}
+
 		.stats-grid,
 		.recommendations-grid,
 		.actions-grid {
 			grid-template-columns: 1fr;
+			gap: var(--spacing-md);
+		}
+
+		.recommendation-card,
+		.stat-card,
+		.action-card {
+			margin: 0 var(--spacing-xs);
 		}
 	}
 
 	@media (max-width: 480px) {
+		.container {
+			padding: 0 var(--spacing-xs);
+		}
+
+		.hero {
+			padding: var(--spacing-sm);
+		}
+
 		.hero-title {
-			font-size: 2rem;
+			font-size: 1.5rem;
+			line-height: 1.3;
+			margin-bottom: var(--spacing-md);
+			max-width: 100%;
+			overflow-wrap: break-word;
+			word-break: break-word;
+		}
+
+		.hero-subtitle {
+			font-size: 0.9rem;
+			line-height: 1.4;
+			overflow-wrap: break-word;
 		}
 
 		.hero-actions {
 			flex-direction: column;
 			width: 100%;
+			gap: var(--spacing-sm);
 		}
 
 		.hero-actions .btn {
 			width: 100%;
+			padding: var(--spacing-sm) var(--spacing-md);
+			font-size: 0.9rem;
+			word-wrap: break-word;
+		}
+
+		.dashboard {
+			padding: var(--spacing-xs) 0;
+		}
+	}
+
+	@media (max-width: 360px) {
+		.container {
+			padding: 0 var(--spacing-xxs, 8px);
+		}
+
+		.hero-title {
+			font-size: 1.3rem;
+			line-height: 1.4;
+			padding: 0 var(--spacing-xs);
+		}
+
+		.hero-subtitle {
+			font-size: 0.8rem;
+			padding: 0 var(--spacing-xs);
+		}
+
+		.hero-visual {
+			width: 120px;
+			height: 120px;
+		}
+
+		.hero-icon {
+			font-size: 2.5rem;
+		}
+
+		.recommendation-card,
+		.stat-card,
+		.action-card {
+			margin: 0;
+			padding: var(--spacing-sm);
+		}
+
+		.card-title {
+			font-size: 0.9rem;
+			word-wrap: break-word;
 		}
 	}
 </style>

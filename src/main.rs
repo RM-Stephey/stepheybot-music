@@ -125,6 +125,10 @@ async fn main() -> Result<()> {
         .route("/api/v1/player/pause", post(pause_playback))
         .route("/api/v1/player/next", post(next_track))
         .route("/api/v1/player/previous", post(previous_track))
+        // Global search endpoints
+        .route("/api/v1/search/global/:query", get(global_search))
+        .route("/api/v1/search/external/:query", get(external_search))
+        .route("/api/v1/download/request", post(request_download))
         // Static file serving for frontend
         .nest_service("/_app", ServeDir::new("/app/frontend/_app"))
         .route("/favicon.svg", get(serve_favicon))
@@ -1173,6 +1177,177 @@ async fn previous_track() -> Result<Json<Value>, StatusCode> {
         "message": "Skipped to previous track",
         "timestamp": Utc::now()
     })))
+}
+
+/// Global search combining local library and external sources
+async fn global_search(Path(query): Path<String>) -> Result<Json<Value>, StatusCode> {
+    info!("Global search request for: {}", query);
+
+    let navidrome_addon = create_navidrome_addon();
+    let mut results = Vec::new();
+
+    // Search local library first
+    match navidrome_addon.search_tracks(&query).await {
+        Ok(local_tracks) => {
+            for track in local_tracks {
+                results.push(json!({
+                    "id": track.id,
+                    "title": track.title,
+                    "artist": track.artist,
+                    "album": track.album,
+                    "duration": track.duration,
+                    "year": track.year,
+                    "genre": track.genre,
+                    "source": "local",
+                    "available": true,
+                    "stream_url": format!("/api/v1/stream/{}", track.id)
+                }));
+            }
+        }
+        Err(e) => {
+            warn!("Failed to search local library: {}", e);
+        }
+    }
+
+    // Search external sources (Spotify Web API simulation)
+    // In production, this would use real Spotify/MusicBrainz APIs
+    let external_results = search_external_apis(&query).await;
+    results.extend(external_results);
+
+    Ok(Json(json!({
+        "success": true,
+        "query": query,
+        "results": results,
+        "total": results.len(),
+        "sources": ["local", "spotify", "musicbrainz"],
+        "timestamp": Utc::now()
+    })))
+}
+
+/// Search external music APIs
+async fn external_search(Path(query): Path<String>) -> Result<Json<Value>, StatusCode> {
+    info!("External search request for: {}", query);
+
+    let external_results = search_external_apis(&query).await;
+
+    Ok(Json(json!({
+        "success": true,
+        "query": query,
+        "results": external_results,
+        "total": external_results.len(),
+        "sources": ["spotify", "musicbrainz"],
+        "timestamp": Utc::now()
+    })))
+}
+
+/// Request download of a track via Lidarr
+async fn request_download(
+    ExtractJson(payload): ExtractJson<Value>,
+) -> Result<Json<Value>, StatusCode> {
+    info!("Download request received: {:?}", payload);
+
+    let track_title = payload
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown");
+    let artist_name = payload
+        .get("artist")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown");
+
+    let lidarr_addon = create_lidarr_addon();
+
+    // First, try to add the artist to Lidarr monitoring
+    match lidarr_addon.search_artist(artist_name).await {
+        Ok(artists) => {
+            if let Some(artist) = artists.first() {
+                // Add artist to monitoring in Lidarr
+                match lidarr_addon
+                    .add_artist_to_monitoring(&artist.artist_name, &artist.foreign_artist_id)
+                    .await
+                {
+                    Ok(_) => {
+                        info!("Artist {} added to Lidarr monitoring", artist.artist_name);
+
+                        Ok(Json(json!({
+                            "success": true,
+                            "message": format!("Download request submitted for {} by {}", track_title, artist_name),
+                            "artist_added": true,
+                            "artist_name": artist_name,
+                            "track_title": track_title,
+                            "status": "monitoring",
+                            "timestamp": Utc::now()
+                        })))
+                    }
+                    Err(e) => {
+                        warn!("Failed to add artist to Lidarr: {}", e);
+                        Ok(Json(json!({
+                            "success": false,
+                            "error": "Failed to add artist to monitoring",
+                            "message": format!("Could not add {} to Lidarr monitoring", artist_name),
+                            "timestamp": Utc::now()
+                        })))
+                    }
+                }
+            } else {
+                Ok(Json(json!({
+                    "success": false,
+                    "error": "Artist not found",
+                    "message": format!("Could not find artist {} in external databases", artist_name),
+                    "timestamp": Utc::now()
+                })))
+            }
+        }
+        Err(e) => {
+            warn!("Failed to search for artist: {}", e);
+            Ok(Json(json!({
+                "success": false,
+                "error": "Search failed",
+                "message": format!("Failed to search for artist {}", artist_name),
+                "timestamp": Utc::now()
+            })))
+        }
+    }
+}
+
+/// Helper function to search external APIs
+async fn search_external_apis(query: &str) -> Vec<Value> {
+    // This is a placeholder implementation
+    // In production, this would integrate with:
+    // - Spotify Web API
+    // - MusicBrainz API
+    // - Last.fm API
+    // - Deezer API
+
+    // For now, return mock external results
+    vec![
+        json!({
+            "id": format!("spotify_{}", uuid::Uuid::new_v4()),
+            "title": format!("{} (External)", query),
+            "artist": "External Artist",
+            "album": "External Album",
+            "duration": 180,
+            "year": 2024,
+            "genre": "Pop",
+            "source": "spotify",
+            "available": false,
+            "external_url": format!("https://open.spotify.com/search/{}", urlencoding::encode(query)),
+            "popularity": 85
+        }),
+        json!({
+            "id": format!("musicbrainz_{}", uuid::Uuid::new_v4()),
+            "title": format!("{} (MB)", query),
+            "artist": "MusicBrainz Artist",
+            "album": "MusicBrainz Album",
+            "duration": 200,
+            "year": 2023,
+            "genre": "Rock",
+            "source": "musicbrainz",
+            "available": false,
+            "external_url": format!("https://musicbrainz.org/search?query={}", urlencoding::encode(query)),
+            "popularity": 70
+        }),
+    ]
 }
 
 /// Smart fallback handler - returns 404 JSON for API routes, frontend for others
