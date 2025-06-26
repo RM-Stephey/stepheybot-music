@@ -1362,14 +1362,14 @@ async fn global_search(
 async fn external_search(Path(query): Path<String>) -> Result<Json<Value>, StatusCode> {
     info!("External search request for: {}", query);
 
-    let external_results = search_external_apis(&query).await;
+    let external_results = search_external_apis(&query, "all").await;
 
     Ok(Json(json!({
         "success": true,
         "query": query,
         "results": external_results,
         "total": external_results.len(),
-        "sources": ["spotify", "musicbrainz"],
+        "sources": ["external"],
         "timestamp": Utc::now()
     })))
 }
@@ -1479,16 +1479,21 @@ async fn search_external_apis(query: &str, category: &str) -> Vec<Value> {
     results
 }
 
-/// Search MusicBrainz for artists
+/// Search MusicBrainz for artists using proper API structure
 async fn search_musicbrainz_artists(query: &str) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
     let client = reqwest::Client::new();
-    let encoded_query = urlencoding::encode(query);
 
-    // MusicBrainz artist search API
+    // Build a proper search query - search by artist name
+    let search_query = format!("artist:{}", query);
+    let encoded_query = urlencoding::encode(&search_query);
+
+    // Use the documented MusicBrainz search API endpoint
     let url = format!(
         "https://musicbrainz.org/ws/2/artist?query={}&limit=10&fmt=json",
         encoded_query
     );
+
+    info!("MusicBrainz artist search URL: {}", url);
 
     let response = client
         .get(&url)
@@ -1497,22 +1502,30 @@ async fn search_musicbrainz_artists(query: &str) -> Result<Vec<Value>, Box<dyn s
             "StepheyBot-Music/1.0 (https://stepheybot.dev)",
         )
         .header("Accept", "application/json")
+        .timeout(std::time::Duration::from_secs(10))
         .send()
         .await?;
 
     if !response.status().is_success() {
+        warn!(
+            "MusicBrainz artist search failed with status: {}",
+            response.status()
+        );
         return Ok(Vec::new());
     }
 
     let musicbrainz_response: serde_json::Value = response.json().await?;
     let mut results = Vec::new();
 
+    info!("MusicBrainz artist search response received");
+
     if let Some(artists) = musicbrainz_response
         .get("artists")
         .and_then(|a| a.as_array())
     {
+        info!("Found {} artists in MusicBrainz response", artists.len());
+
         for artist in artists.iter().take(5) {
-            // Limit to top 5 artists
             if let Some(artist_name) = artist.get("name").and_then(|n| n.as_str()) {
                 let artist_id = artist.get("id").and_then(|i| i.as_str()).unwrap_or("");
                 let disambiguation = artist
@@ -1520,13 +1533,21 @@ async fn search_musicbrainz_artists(query: &str) -> Result<Vec<Value>, Box<dyn s
                     .and_then(|d| d.as_str())
                     .unwrap_or("");
                 let country = artist.get("country").and_then(|c| c.as_str()).unwrap_or("");
-                let life_span = artist
+
+                // Get begin date from life-span
+                let life_span_begin = artist
                     .get("life-span")
                     .and_then(|ls| ls.get("begin"))
                     .and_then(|b| b.as_str())
                     .unwrap_or("");
 
-                // Get genres/tags if available
+                // Get artist type (Person, Group, etc.)
+                let artist_type = artist
+                    .get("type")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("Artist");
+
+                // Get genres from tags if available
                 let genres = artist
                     .get("tags")
                     .and_then(|tags| tags.as_array())
@@ -1537,22 +1558,27 @@ async fn search_musicbrainz_artists(query: &str) -> Result<Vec<Value>, Box<dyn s
                             .collect::<Vec<_>>()
                             .join(", ")
                     })
-                    .unwrap_or_else(|| "Unknown".to_string());
+                    .unwrap_or_else(|| artist_type.to_string());
 
                 let score = artist.get("score").and_then(|s| s.as_u64()).unwrap_or(0);
+
+                // Build album field with context
+                let album_context = if !disambiguation.is_empty() {
+                    disambiguation.to_string()
+                } else if !country.is_empty() {
+                    format!("{} ({})", artist_type, country)
+                } else {
+                    artist_type.to_string()
+                };
 
                 results.push(json!({
                     "id": format!("musicbrainz_artist_{}", artist_id),
                     "title": artist_name,
                     "artist": artist_name,
-                    "album": if disambiguation.is_empty() {
-                        format!("Artist{}", if !country.is_empty() { format!(" ({})", country) } else { String::new() })
-                    } else {
-                        disambiguation
-                    },
+                    "album": album_context,
                     "duration": null,
-                    "year": if !life_span.is_empty() {
-                        life_span.split('-').next().and_then(|y| y.parse::<u32>().ok())
+                    "year": if !life_span_begin.is_empty() {
+                        life_span_begin.split('-').next().and_then(|y| y.parse::<u32>().ok())
                     } else {
                         None
                     },
@@ -1563,25 +1589,33 @@ async fn search_musicbrainz_artists(query: &str) -> Result<Vec<Value>, Box<dyn s
                     "musicbrainz_id": artist_id,
                     "score": score,
                     "country": country,
-                    "disambiguation": disambiguation
+                    "disambiguation": disambiguation,
+                    "type": artist_type
                 }));
             }
         }
+    } else {
+        info!("No artists found in MusicBrainz response");
     }
 
     Ok(results)
 }
 
-/// Search MusicBrainz for albums/release-groups
+/// Search MusicBrainz for albums/release-groups using proper API structure
 async fn search_musicbrainz_albums(query: &str) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
     let client = reqwest::Client::new();
-    let encoded_query = urlencoding::encode(query);
 
-    // MusicBrainz release-group search API
+    // Build a proper search query for release groups
+    let search_query = format!("release:{}", query);
+    let encoded_query = urlencoding::encode(&search_query);
+
+    // Use the documented MusicBrainz release-group search API endpoint
     let url = format!(
         "https://musicbrainz.org/ws/2/release-group?query={}&limit=10&fmt=json",
         encoded_query
     );
+
+    info!("MusicBrainz album search URL: {}", url);
 
     let response = client
         .get(&url)
@@ -1590,28 +1624,57 @@ async fn search_musicbrainz_albums(query: &str) -> Result<Vec<Value>, Box<dyn st
             "StepheyBot-Music/1.0 (https://stepheybot.dev)",
         )
         .header("Accept", "application/json")
+        .timeout(std::time::Duration::from_secs(10))
         .send()
         .await?;
 
     if !response.status().is_success() {
+        warn!(
+            "MusicBrainz album search failed with status: {}",
+            response.status()
+        );
         return Ok(Vec::new());
     }
 
     let musicbrainz_response: serde_json::Value = response.json().await?;
     let mut results = Vec::new();
 
+    info!("MusicBrainz album search response received");
+
     if let Some(release_groups) = musicbrainz_response
         .get("release-groups")
         .and_then(|rg| rg.as_array())
     {
+        info!(
+            "Found {} release groups in MusicBrainz response",
+            release_groups.len()
+        );
+
         for album in release_groups.iter().take(5) {
-            // Limit to top 5 albums
             if let Some(album_title) = album.get("title").and_then(|t| t.as_str()) {
                 let album_id = album.get("id").and_then(|i| i.as_str()).unwrap_or("");
-                let album_type = album
+                let primary_type = album
                     .get("primary-type")
                     .and_then(|pt| pt.as_str())
                     .unwrap_or("Album");
+
+                let secondary_types = album
+                    .get("secondary-types")
+                    .and_then(|st| st.as_array())
+                    .map(|types| {
+                        types
+                            .iter()
+                            .filter_map(|t| t.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+
+                let album_type = if secondary_types.is_empty() {
+                    primary_type.to_string()
+                } else {
+                    format!("{} ({})", primary_type, secondary_types)
+                };
 
                 let artist_name = album
                     .get("artist-credit")
@@ -1651,27 +1714,36 @@ async fn search_musicbrainz_albums(query: &str) -> Result<Vec<Value>, Box<dyn st
                     "external_url": format!("https://musicbrainz.org/release-group/{}", album_id),
                     "musicbrainz_id": album_id,
                     "score": score,
+                    "primary_type": primary_type,
+                    "secondary_types": secondary_types,
                     "type": "album"
                 }));
             }
         }
+    } else {
+        info!("No release groups found in MusicBrainz response");
     }
 
     Ok(results)
 }
 
-/// Search MusicBrainz for recordings/tracks
+/// Search MusicBrainz for recordings/tracks using proper API structure
 async fn search_musicbrainz_recordings(
     query: &str,
 ) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
     let client = reqwest::Client::new();
-    let encoded_query = urlencoding::encode(query);
 
-    // MusicBrainz recording search API
+    // Build a proper search query for recordings
+    let search_query = format!("recording:{}", query);
+    let encoded_query = urlencoding::encode(&search_query);
+
+    // Use the documented MusicBrainz recording search API endpoint
     let url = format!(
         "https://musicbrainz.org/ws/2/recording?query={}&limit=10&fmt=json",
         encoded_query
     );
+
+    info!("MusicBrainz recording search URL: {}", url);
 
     let response = client
         .get(&url)
@@ -1680,25 +1752,37 @@ async fn search_musicbrainz_recordings(
             "StepheyBot-Music/1.0 (https://stepheybot.dev)",
         )
         .header("Accept", "application/json")
+        .timeout(std::time::Duration::from_secs(10))
         .send()
         .await?;
 
     if !response.status().is_success() {
+        warn!(
+            "MusicBrainz recording search failed with status: {}",
+            response.status()
+        );
         return Ok(Vec::new());
     }
 
     let musicbrainz_response: serde_json::Value = response.json().await?;
     let mut results = Vec::new();
 
+    info!("MusicBrainz recording search response received");
+
     if let Some(recordings) = musicbrainz_response
         .get("recordings")
         .and_then(|r| r.as_array())
     {
+        info!(
+            "Found {} recordings in MusicBrainz response",
+            recordings.len()
+        );
+
         for recording in recordings.iter().take(5) {
-            // Limit to top 5 recordings
             if let Some(track_title) = recording.get("title").and_then(|t| t.as_str()) {
                 let recording_id = recording.get("id").and_then(|i| i.as_str()).unwrap_or("");
 
+                // Get artist name from artist-credit
                 let artist_name = recording
                     .get("artist-credit")
                     .and_then(|ac| ac.as_array())
@@ -1708,6 +1792,7 @@ async fn search_musicbrainz_recordings(
                     .and_then(|name| name.as_str())
                     .unwrap_or("Unknown Artist");
 
+                // Get duration from length field (in milliseconds)
                 let length_ms = recording
                     .get("length")
                     .and_then(|l| l.as_u64())
@@ -1718,7 +1803,7 @@ async fn search_musicbrainz_recordings(
                     None
                 };
 
-                // Try to get release info for context
+                // Get release info for context
                 let release_title = recording
                     .get("releases")
                     .and_then(|releases| releases.as_array())
@@ -1727,7 +1812,38 @@ async fn search_musicbrainz_recordings(
                     .and_then(|title| title.as_str())
                     .unwrap_or("Single");
 
+                // Get release date if available
+                let release_date = recording
+                    .get("releases")
+                    .and_then(|releases| releases.as_array())
+                    .and_then(|releases| releases.first())
+                    .and_then(|release| release.get("date"))
+                    .and_then(|date| date.as_str())
+                    .unwrap_or("");
+
+                let year = if !release_date.is_empty() {
+                    release_date
+                        .split('-')
+                        .next()
+                        .and_then(|y| y.parse::<u32>().ok())
+                } else {
+                    None
+                };
+
                 let score = recording.get("score").and_then(|s| s.as_u64()).unwrap_or(0);
+
+                // Get ISRCs if available
+                let isrcs = recording
+                    .get("isrcs")
+                    .and_then(|isrcs| isrcs.as_array())
+                    .map(|isrcs| {
+                        isrcs
+                            .iter()
+                            .filter_map(|isrc| isrc.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
 
                 results.push(json!({
                     "id": format!("musicbrainz_recording_{}", recording_id),
@@ -1735,17 +1851,20 @@ async fn search_musicbrainz_recordings(
                     "artist": artist_name,
                     "album": release_title,
                     "duration": duration_seconds,
-                    "year": null,
-                    "genre": "Unknown",
+                    "year": year,
+                    "genre": "Recording",
                     "source": "musicbrainz",
                     "available": false,
                     "external_url": format!("https://musicbrainz.org/recording/{}", recording_id),
                     "musicbrainz_id": recording_id,
                     "score": score,
+                    "isrcs": isrcs,
                     "type": "track"
                 }));
             }
         }
+    } else {
+        info!("No recordings found in MusicBrainz response");
     }
 
     Ok(results)
