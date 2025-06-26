@@ -6,12 +6,14 @@
 pub mod library;
 pub mod playlist;
 pub mod recommendation;
+pub mod storage;
 pub mod sync;
 
 // Re-export for convenience
 pub use library::LibraryService;
 pub use playlist::PlaylistService;
 pub use recommendation::RecommendationService;
+pub use storage::StorageManager;
 pub use sync::SyncService;
 
 use anyhow::Result;
@@ -32,6 +34,7 @@ pub struct ServiceManager {
     pub library: Arc<LibraryService>,
     pub playlist: Arc<PlaylistService>,
     pub recommendation: Arc<RecommendationService>,
+    pub storage: Arc<StorageManager>,
     pub sync: Arc<SyncService>,
 }
 
@@ -67,6 +70,10 @@ impl ServiceManager {
             cache_dir,
         )?);
 
+        let storage = Arc::new(crate::services::storage::create_storage_manager());
+        storage.initialize().await?;
+        storage.start_monitor().await?;
+
         let sync = Arc::new(SyncService::new(
             database.clone(),
             navidrome_client.clone(),
@@ -79,6 +86,7 @@ impl ServiceManager {
             library,
             playlist,
             recommendation,
+            storage,
             sync,
         })
     }
@@ -91,9 +99,14 @@ impl ServiceManager {
         status.library = self.library.health_check().await.is_ok();
         status.playlist = self.playlist.health_check().await.is_ok();
         status.recommendation = self.recommendation.health_check().await.is_ok();
+        status.storage = true; // Storage manager doesn't have health check yet
         status.sync = self.sync.health_check().await.is_ok();
 
-        status.overall = status.library && status.playlist && status.recommendation && status.sync;
+        status.overall = status.library
+            && status.playlist
+            && status.recommendation
+            && status.storage
+            && status.sync;
 
         Ok(status)
     }
@@ -103,12 +116,14 @@ impl ServiceManager {
         let library_stats = self.library.get_stats().await.unwrap_or_default();
         let playlist_stats = self.playlist.get_stats().await.unwrap_or_default();
         let recommendation_stats = self.recommendation.get_stats().await.unwrap_or_default();
+        let storage_stats = self.storage.get_storage_stats().await.ok();
         let sync_stats = self.sync.get_stats().await.unwrap_or_default();
 
         Ok(ServiceStats {
             library: library_stats,
             playlist: playlist_stats,
             recommendation: recommendation_stats,
+            storage: storage_stats,
             sync: sync_stats,
         })
     }
@@ -120,6 +135,10 @@ impl ServiceManager {
         // Shutdown services in reverse dependency order
         if let Err(e) = self.sync.shutdown().await {
             error!("Failed to shutdown sync service: {}", e);
+        }
+
+        if let Err(e) = self.storage.cleanup_processing().await {
+            error!("Failed to cleanup storage processing: {}", e);
         }
 
         if let Err(e) = self.recommendation.shutdown().await {
@@ -146,6 +165,7 @@ pub struct ServiceHealthStatus {
     pub library: bool,
     pub playlist: bool,
     pub recommendation: bool,
+    pub storage: bool,
     pub sync: bool,
 }
 
@@ -155,6 +175,7 @@ pub struct ServiceStats {
     pub library: LibraryStats,
     pub playlist: PlaylistStats,
     pub recommendation: RecommendationStats,
+    pub storage: Option<serde_json::Value>,
     pub sync: SyncStats,
 }
 
