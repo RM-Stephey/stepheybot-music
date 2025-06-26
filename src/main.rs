@@ -10,7 +10,7 @@ use crate::lidarr_addon::is_lidarr_configured;
 
 use anyhow::Result;
 use axum::{
-    extract::{Json as ExtractJson, Path},
+    extract::{Json as ExtractJson, Path, Query},
     http::{header, StatusCode},
     response::{Html, Json, Response},
     routing::{get, post},
@@ -1182,8 +1182,17 @@ async fn previous_track() -> Result<Json<Value>, StatusCode> {
 }
 
 /// Global search combining local library and external sources
-async fn global_search(Path(query): Path<String>) -> Result<Json<Value>, StatusCode> {
-    info!("Global search request for: {}", query);
+async fn global_search(
+    Path(query): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Value>, StatusCode> {
+    let search_category = params.get("category").map(|s| s.as_str()).unwrap_or("all");
+    let search_type = params.get("type").map(|s| s.as_str()).unwrap_or("global");
+
+    info!(
+        "Global search request for: {} (category: {}, type: {})",
+        query, search_category, search_type
+    );
     info!("DEBUG: Modified global_search function is active - checking Lidarr integration");
 
     let navidrome_addon = create_navidrome_addon();
@@ -1324,10 +1333,11 @@ async fn global_search(Path(query): Path<String>) -> Result<Json<Value>, StatusC
         info!("Lidarr not configured, skipping Lidarr search");
     }
 
-    // Search external sources (Spotify Web API simulation)
-    // In production, this would use real Spotify/MusicBrainz APIs
-    let external_results = search_external_apis(&query).await;
-    results.extend(external_results);
+    // Search external sources based on search type
+    if search_type == "global" || search_type == "external" {
+        let external_results = search_external_apis(&query, search_category).await;
+        results.extend(external_results);
+    }
 
     // Generate sources dynamically from actual results
     let mut sources = std::collections::HashSet::new();
@@ -1435,51 +1445,310 @@ async fn request_download(
 }
 
 /// Helper function to search external APIs
-async fn search_external_apis(query: &str) -> Vec<Value> {
-    // This is a placeholder implementation
-    // In production, this would integrate with:
-    // - Spotify Web API
-    // - MusicBrainz API
-    // - Last.fm API
-    // - Deezer API
-
-    // For now, return mock external results that reflect the search query
+async fn search_external_apis(query: &str, category: &str) -> Vec<Value> {
     let mut results = Vec::new();
 
-    // Create more realistic mock results based on the query
-    let query_lower = query.to_lowercase();
-
-    // Spotify-style results
-    results.push(json!({
-        "id": format!("spotify_{}", uuid::Uuid::new_v4()),
-        "title": format!("Best of {}", query),
-        "artist": query,
-        "album": format!("{} - Greatest Hits", query),
-        "duration": 180,
-        "year": 2024,
-        "genre": if query_lower.contains("van buuren") || query_lower.contains("trance") { "Trance" } else { "Pop" },
-        "source": "spotify",
-        "available": false,
-        "external_url": format!("https://open.spotify.com/search/{}", urlencoding::encode(query)),
-        "popularity": 85
-    }));
-
-    // MusicBrainz-style results
-    results.push(json!({
-        "id": format!("musicbrainz_{}", uuid::Uuid::new_v4()),
-        "title": format!("{} (Live)", query),
-        "artist": query,
-        "album": format!("{} - Live Collection", query),
-        "duration": 200,
-        "year": 2023,
-        "genre": if query_lower.contains("van buuren") || query_lower.contains("trance") { "Electronic" } else { "Rock" },
-        "source": "musicbrainz",
-        "available": false,
-        "external_url": format!("https://musicbrainz.org/search?query={}", urlencoding::encode(query)),
-        "popularity": 70
-    }));
+    // Search MusicBrainz based on category
+    match category {
+        "artist" => {
+            if let Ok(musicbrainz_results) = search_musicbrainz_artists(query).await {
+                results.extend(musicbrainz_results);
+            }
+        }
+        "album" => {
+            if let Ok(musicbrainz_results) = search_musicbrainz_albums(query).await {
+                results.extend(musicbrainz_results);
+            }
+        }
+        "track" => {
+            if let Ok(musicbrainz_results) = search_musicbrainz_recordings(query).await {
+                results.extend(musicbrainz_results);
+            }
+        }
+        "all" | _ => {
+            // Search all categories
+            if let Ok(musicbrainz_results) = search_musicbrainz_artists(query).await {
+                results.extend(musicbrainz_results);
+            }
+            if let Ok(musicbrainz_results) = search_musicbrainz_albums(query).await {
+                results.extend(musicbrainz_results);
+            }
+        }
+    }
 
     results
+}
+
+/// Search MusicBrainz for artists
+async fn search_musicbrainz_artists(query: &str) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
+    let client = reqwest::Client::new();
+    let encoded_query = urlencoding::encode(query);
+
+    // MusicBrainz artist search API
+    let url = format!(
+        "https://musicbrainz.org/ws/2/artist?query={}&limit=10&fmt=json",
+        encoded_query
+    );
+
+    let response = client
+        .get(&url)
+        .header(
+            "User-Agent",
+            "StepheyBot-Music/1.0 (https://stepheybot.dev)",
+        )
+        .header("Accept", "application/json")
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Ok(Vec::new());
+    }
+
+    let musicbrainz_response: serde_json::Value = response.json().await?;
+    let mut results = Vec::new();
+
+    if let Some(artists) = musicbrainz_response
+        .get("artists")
+        .and_then(|a| a.as_array())
+    {
+        for artist in artists.iter().take(5) {
+            // Limit to top 5 artists
+            if let Some(artist_name) = artist.get("name").and_then(|n| n.as_str()) {
+                let artist_id = artist.get("id").and_then(|i| i.as_str()).unwrap_or("");
+                let disambiguation = artist
+                    .get("disambiguation")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("");
+                let country = artist.get("country").and_then(|c| c.as_str()).unwrap_or("");
+                let life_span = artist
+                    .get("life-span")
+                    .and_then(|ls| ls.get("begin"))
+                    .and_then(|b| b.as_str())
+                    .unwrap_or("");
+
+                // Get genres/tags if available
+                let genres = artist
+                    .get("tags")
+                    .and_then(|tags| tags.as_array())
+                    .map(|tags| {
+                        tags.iter()
+                            .filter_map(|tag| tag.get("name").and_then(|n| n.as_str()))
+                            .take(3)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_else(|| "Unknown".to_string());
+
+                let score = artist.get("score").and_then(|s| s.as_u64()).unwrap_or(0);
+
+                results.push(json!({
+                    "id": format!("musicbrainz_artist_{}", artist_id),
+                    "title": artist_name,
+                    "artist": artist_name,
+                    "album": if disambiguation.is_empty() {
+                        format!("Artist{}", if !country.is_empty() { format!(" ({})", country) } else { String::new() })
+                    } else {
+                        disambiguation
+                    },
+                    "duration": null,
+                    "year": if !life_span.is_empty() {
+                        life_span.split('-').next().and_then(|y| y.parse::<u32>().ok())
+                    } else {
+                        None
+                    },
+                    "genre": genres,
+                    "source": "musicbrainz",
+                    "available": false,
+                    "external_url": format!("https://musicbrainz.org/artist/{}", artist_id),
+                    "musicbrainz_id": artist_id,
+                    "score": score,
+                    "country": country,
+                    "disambiguation": disambiguation
+                }));
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+/// Search MusicBrainz for albums/release-groups
+async fn search_musicbrainz_albums(query: &str) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
+    let client = reqwest::Client::new();
+    let encoded_query = urlencoding::encode(query);
+
+    // MusicBrainz release-group search API
+    let url = format!(
+        "https://musicbrainz.org/ws/2/release-group?query={}&limit=10&fmt=json",
+        encoded_query
+    );
+
+    let response = client
+        .get(&url)
+        .header(
+            "User-Agent",
+            "StepheyBot-Music/1.0 (https://stepheybot.dev)",
+        )
+        .header("Accept", "application/json")
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Ok(Vec::new());
+    }
+
+    let musicbrainz_response: serde_json::Value = response.json().await?;
+    let mut results = Vec::new();
+
+    if let Some(release_groups) = musicbrainz_response
+        .get("release-groups")
+        .and_then(|rg| rg.as_array())
+    {
+        for album in release_groups.iter().take(5) {
+            // Limit to top 5 albums
+            if let Some(album_title) = album.get("title").and_then(|t| t.as_str()) {
+                let album_id = album.get("id").and_then(|i| i.as_str()).unwrap_or("");
+                let album_type = album
+                    .get("primary-type")
+                    .and_then(|pt| pt.as_str())
+                    .unwrap_or("Album");
+
+                let artist_name = album
+                    .get("artist-credit")
+                    .and_then(|ac| ac.as_array())
+                    .and_then(|artists| artists.first())
+                    .and_then(|artist| artist.get("artist"))
+                    .and_then(|artist| artist.get("name"))
+                    .and_then(|name| name.as_str())
+                    .unwrap_or("Unknown Artist");
+
+                let first_release_date = album
+                    .get("first-release-date")
+                    .and_then(|frd| frd.as_str())
+                    .unwrap_or("");
+
+                let year = if !first_release_date.is_empty() {
+                    first_release_date
+                        .split('-')
+                        .next()
+                        .and_then(|y| y.parse::<u32>().ok())
+                } else {
+                    None
+                };
+
+                let score = album.get("score").and_then(|s| s.as_u64()).unwrap_or(0);
+
+                results.push(json!({
+                    "id": format!("musicbrainz_album_{}", album_id),
+                    "title": album_title,
+                    "artist": artist_name,
+                    "album": album_title,
+                    "duration": null,
+                    "year": year,
+                    "genre": album_type,
+                    "source": "musicbrainz",
+                    "available": false,
+                    "external_url": format!("https://musicbrainz.org/release-group/{}", album_id),
+                    "musicbrainz_id": album_id,
+                    "score": score,
+                    "type": "album"
+                }));
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+/// Search MusicBrainz for recordings/tracks
+async fn search_musicbrainz_recordings(
+    query: &str,
+) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
+    let client = reqwest::Client::new();
+    let encoded_query = urlencoding::encode(query);
+
+    // MusicBrainz recording search API
+    let url = format!(
+        "https://musicbrainz.org/ws/2/recording?query={}&limit=10&fmt=json",
+        encoded_query
+    );
+
+    let response = client
+        .get(&url)
+        .header(
+            "User-Agent",
+            "StepheyBot-Music/1.0 (https://stepheybot.dev)",
+        )
+        .header("Accept", "application/json")
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Ok(Vec::new());
+    }
+
+    let musicbrainz_response: serde_json::Value = response.json().await?;
+    let mut results = Vec::new();
+
+    if let Some(recordings) = musicbrainz_response
+        .get("recordings")
+        .and_then(|r| r.as_array())
+    {
+        for recording in recordings.iter().take(5) {
+            // Limit to top 5 recordings
+            if let Some(track_title) = recording.get("title").and_then(|t| t.as_str()) {
+                let recording_id = recording.get("id").and_then(|i| i.as_str()).unwrap_or("");
+
+                let artist_name = recording
+                    .get("artist-credit")
+                    .and_then(|ac| ac.as_array())
+                    .and_then(|artists| artists.first())
+                    .and_then(|artist| artist.get("artist"))
+                    .and_then(|artist| artist.get("name"))
+                    .and_then(|name| name.as_str())
+                    .unwrap_or("Unknown Artist");
+
+                let length_ms = recording
+                    .get("length")
+                    .and_then(|l| l.as_u64())
+                    .unwrap_or(0);
+                let duration_seconds = if length_ms > 0 {
+                    Some(length_ms / 1000)
+                } else {
+                    None
+                };
+
+                // Try to get release info for context
+                let release_title = recording
+                    .get("releases")
+                    .and_then(|releases| releases.as_array())
+                    .and_then(|releases| releases.first())
+                    .and_then(|release| release.get("title"))
+                    .and_then(|title| title.as_str())
+                    .unwrap_or("Single");
+
+                let score = recording.get("score").and_then(|s| s.as_u64()).unwrap_or(0);
+
+                results.push(json!({
+                    "id": format!("musicbrainz_recording_{}", recording_id),
+                    "title": track_title,
+                    "artist": artist_name,
+                    "album": release_title,
+                    "duration": duration_seconds,
+                    "year": null,
+                    "genre": "Unknown",
+                    "source": "musicbrainz",
+                    "available": false,
+                    "external_url": format!("https://musicbrainz.org/recording/{}", recording_id),
+                    "musicbrainz_id": recording_id,
+                    "score": score,
+                    "type": "track"
+                }));
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 /// Smart fallback handler - returns 404 JSON for API routes, frontend for others
