@@ -16,6 +16,8 @@
     let searchCategory = "all"; // 'all', 'artist', 'album', 'track'
     let sortBy = "relevance"; // 'relevance', 'popularity', 'year', 'duration'
     let downloadRequests = new Map(); // Track download request status
+    let previewRequests = new Map(); // Track preview request status
+    let activeDownloads = new Map(); // Track active downloads
 
     // No more debouncing - search only on submit/enter
 
@@ -209,6 +211,131 @@
             searchResults = sortResults(searchResults);
         }
     }
+
+    // Download MusicBrainz entity
+    async function downloadMusicBrainzEntity(track) {
+        const requestKey = track.musicbrainz_id || track.id;
+
+        if (downloadRequests.get(requestKey) === "downloading") {
+            return; // Already downloading
+        }
+
+        downloadRequests.set(requestKey, "downloading");
+        searchResults = [...searchResults]; // Trigger reactivity
+
+        try {
+            const payload = {
+                type: track.type || "track",
+                name: track.title,
+                artist: track.artist,
+                mbid: track.musicbrainz_id,
+            };
+
+            const response = await fetch(
+                `/api/v1/download/musicbrainz/${track.musicbrainz_id}`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(payload),
+                },
+            );
+
+            const result = await response.json();
+
+            if (result.success) {
+                downloadRequests.set(requestKey, "success");
+                if (result.downloads && result.downloads.length > 0) {
+                    // Show available downloads
+                    activeDownloads.set(requestKey, result.downloads);
+                }
+            } else {
+                downloadRequests.set(requestKey, "failed");
+                console.error("Download failed:", result.error);
+            }
+        } catch (error) {
+            console.error("Download error:", error);
+            downloadRequests.set(requestKey, "failed");
+        }
+
+        searchResults = [...searchResults]; // Trigger reactivity
+    }
+
+    // Preview MusicBrainz track
+    async function previewMusicBrainzTrack(track) {
+        const requestKey = track.musicbrainz_id || track.id;
+
+        if (previewRequests.get(requestKey) === "loading") {
+            return; // Already loading
+        }
+
+        previewRequests.set(requestKey, "loading");
+        searchResults = [...searchResults]; // Trigger reactivity
+
+        try {
+            const response = await fetch(
+                `/api/v1/preview/musicbrainz/${track.musicbrainz_id}`,
+            );
+            const result = await response.json();
+
+            if (result.success && result.stream_url) {
+                previewRequests.set(requestKey, "available");
+                // In a real implementation, this would start playback
+                console.log("Preview available:", result.stream_url);
+            } else {
+                previewRequests.set(requestKey, "unavailable");
+            }
+        } catch (error) {
+            console.error("Preview error:", error);
+            previewRequests.set(requestKey, "unavailable");
+        }
+
+        searchResults = [...searchResults]; // Trigger reactivity
+    }
+
+    // Get download status for display
+    function getDownloadButtonState(track) {
+        const requestKey = track.musicbrainz_id || track.id;
+        const status = downloadRequests.get(requestKey);
+        const hasActiveDownloads = activeDownloads.has(requestKey);
+
+        if (status === "downloading")
+            return {
+                text: "Searching...",
+                disabled: true,
+                class: "downloading",
+            };
+        if (status === "success" && hasActiveDownloads)
+            return { text: "Available", disabled: false, class: "success" };
+        if (status === "success")
+            return {
+                text: "Added to Monitor",
+                disabled: true,
+                class: "success",
+            };
+        if (status === "failed")
+            return { text: "Try Again", disabled: false, class: "failed" };
+        return { text: "Download", disabled: false, class: "default" };
+    }
+
+    // Get preview status for display
+    function getPreviewButtonState(track) {
+        const requestKey = track.musicbrainz_id || track.id;
+        const status = previewRequests.get(requestKey);
+
+        if (status === "loading")
+            return { text: "Loading...", disabled: true, class: "loading" };
+        if (status === "available")
+            return {
+                text: "Play Preview",
+                disabled: false,
+                class: "available",
+            };
+        if (status === "unavailable")
+            return { text: "No Preview", disabled: true, class: "unavailable" };
+        return { text: "Preview", disabled: false, class: "default" };
+    }
 </script>
 
 <div class="global-search" class:loaded={mounted}>
@@ -387,6 +514,38 @@
                                         >
                                     {/if}
                                 {/if}
+                                {#if track.source === "musicbrainz"}
+                                    {#if track.rating && track.rating > 0}
+                                        <span class="meta-item rating"
+                                            >⭐ {track.rating}/5</span
+                                        >
+                                    {/if}
+                                    {#if track.country}
+                                        <span class="meta-item country"
+                                            >🌍 {track.country}</span
+                                        >
+                                    {/if}
+                                    {#if track.type}
+                                        <span class="meta-item type"
+                                            >🏷️ {track.type}</span
+                                        >
+                                    {/if}
+                                    {#if track.aliases && track.aliases.length > 0}
+                                        <span class="meta-item aliases"
+                                            >📝 {track.aliases}</span
+                                        >
+                                    {/if}
+                                    {#if track.isrcs && track.isrcs.length > 0}
+                                        <span class="meta-item isrcs"
+                                            >🔢 ISRC</span
+                                        >
+                                    {/if}
+                                    {#if track.score && track.score > 0}
+                                        <span class="meta-item score"
+                                            >🎯 {track.score}% match</span
+                                        >
+                                    {/if}
+                                {/if}
                             </div>
                         </div>
 
@@ -436,6 +595,42 @@
                                 >
                                     ➕ Queue
                                 </button>
+                            {:else if track.source === "musicbrainz"}
+                                <!-- MusicBrainz specific actions -->
+                                {#if track.type === "track"}
+                                    {@const previewState =
+                                        getPreviewButtonState(track)}
+                                    <button
+                                        class="action-btn preview-btn {previewState.class}"
+                                        on:click={() =>
+                                            previewMusicBrainzTrack(track)}
+                                        disabled={previewState.disabled}
+                                    >
+                                        🎵 {previewState.text}
+                                    </button>
+                                {/if}
+
+                                {@const downloadState =
+                                    getDownloadButtonState(track)}
+                                <button
+                                    class="action-btn download-btn {downloadState.class}"
+                                    on:click={() =>
+                                        downloadMusicBrainzEntity(track)}
+                                    disabled={downloadState.disabled}
+                                >
+                                    ⬇ {downloadState.text}
+                                </button>
+
+                                {#if track.external_url}
+                                    <a
+                                        href={track.external_url}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        class="action-btn external-link"
+                                    >
+                                        🔗 MusicBrainz
+                                    </a>
+                                {/if}
                             {:else if track.source === "lidarr" && track.downloadable}
                                 {#if getDownloadStatus(track) === "requesting"}
                                     <button
@@ -892,6 +1087,36 @@
         color: #ffa500;
     }
 
+    .meta-item.rating {
+        background: rgba(255, 215, 0, 0.2);
+        color: #ffd700;
+    }
+
+    .meta-item.country {
+        background: rgba(135, 206, 235, 0.2);
+        color: #87ceeb;
+    }
+
+    .meta-item.type {
+        background: rgba(147, 112, 219, 0.2);
+        color: #9370db;
+    }
+
+    .meta-item.aliases {
+        background: rgba(255, 182, 193, 0.2);
+        color: #ffb6c1;
+    }
+
+    .meta-item.isrcs {
+        background: rgba(144, 238, 144, 0.2);
+        color: #90ee90;
+    }
+
+    .meta-item.score {
+        background: rgba(255, 99, 71, 0.2);
+        color: #ff6347;
+    }
+
     .source-info {
         position: absolute;
         top: 15px;
@@ -1129,5 +1354,66 @@
             font-size: 0.8rem;
             padding: 6px 10px;
         }
+    }
+
+    /* Preview and Download Button States */
+    .action-btn.preview-btn {
+        background: rgba(138, 43, 226, 0.1);
+        border-color: #8a2be2;
+        color: #8a2be2;
+    }
+
+    .action-btn.preview-btn:hover {
+        background: rgba(138, 43, 226, 0.2);
+    }
+
+    .action-btn.preview-btn.loading {
+        background: rgba(255, 165, 0, 0.1);
+        border-color: #ffa500;
+        color: #ffa500;
+        cursor: wait;
+    }
+
+    .action-btn.preview-btn.available {
+        background: rgba(50, 205, 50, 0.1);
+        border-color: #32cd32;
+        color: #32cd32;
+    }
+
+    .action-btn.preview-btn.unavailable {
+        background: rgba(128, 128, 128, 0.1);
+        border-color: #808080;
+        color: #808080;
+        opacity: 0.6;
+    }
+
+    .action-btn.download-btn.downloading {
+        background: rgba(255, 165, 0, 0.1);
+        border-color: #ffa500;
+        color: #ffa500;
+        cursor: wait;
+    }
+
+    .action-btn.download-btn.success {
+        background: rgba(50, 205, 50, 0.1);
+        border-color: #32cd32;
+        color: #32cd32;
+    }
+
+    .action-btn.download-btn.failed {
+        background: rgba(220, 20, 60, 0.1);
+        border-color: #dc143c;
+        color: #dc143c;
+    }
+
+    .action-btn.download-btn.default {
+        background: rgba(0, 191, 255, 0.1);
+        border-color: #00bfff;
+        color: #00bfff;
+    }
+
+    .action-btn.download-btn.default:hover {
+        background: rgba(0, 191, 255, 0.2);
+        transform: translateY(-1px);
     }
 </style>

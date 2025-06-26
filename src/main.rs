@@ -116,6 +116,19 @@ async fn main() -> Result<()> {
         .route("/api/v1/lidarr/artists", get(lidarr_artists))
         .route("/api/v1/lidarr/search/:query", get(lidarr_search))
         .route("/api/v1/lidarr/add", post(lidarr_add_artist))
+        // Download integration endpoints
+        .route(
+            "/api/v1/download/musicbrainz/:mbid",
+            post(download_musicbrainz_entity),
+        )
+        .route(
+            "/api/v1/download/status/:request_id",
+            get(get_download_status),
+        )
+        .route(
+            "/api/v1/preview/musicbrainz/:mbid",
+            get(preview_musicbrainz_track),
+        )
         // Music streaming endpoints
         .route("/api/v1/stream/:track_id", get(stream_track))
         .route("/api/v1/tracks/search/:query", get(search_tracks))
@@ -1560,9 +1573,9 @@ async fn search_musicbrainz_artists(query: &str) -> Result<Vec<Value>, Box<dyn s
     let search_query = format!("artist:{}", query);
     let encoded_query = urlencoding::encode(&search_query);
 
-    // Use the documented MusicBrainz search API endpoint
+    // Use the documented MusicBrainz search API endpoint with enhanced metadata
     let url = format!(
-        "https://musicbrainz.org/ws/2/artist?query={}&limit=10&fmt=json",
+        "https://musicbrainz.org/ws/2/artist?query={}&limit=10&fmt=json&inc=aliases+tags+ratings+url-rels+artist-rels",
         encoded_query
     );
 
@@ -1633,6 +1646,50 @@ async fn search_musicbrainz_artists(query: &str) -> Result<Vec<Value>, Box<dyn s
                     })
                     .unwrap_or_else(|| artist_type.to_string());
 
+                // Get aliases
+                let aliases = artist
+                    .get("aliases")
+                    .and_then(|aliases| aliases.as_array())
+                    .map(|aliases| {
+                        aliases
+                            .iter()
+                            .filter_map(|alias| alias.get("name").and_then(|n| n.as_str()))
+                            .take(3)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_default();
+
+                // Get rating
+                let rating = artist
+                    .get("rating")
+                    .and_then(|r| r.get("value"))
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+
+                // Get external URLs
+                let external_urls = artist
+                    .get("relations")
+                    .and_then(|relations| relations.as_array())
+                    .map(|relations| {
+                        relations
+                            .iter()
+                            .filter_map(|rel| {
+                                if rel.get("type").and_then(|t| t.as_str())
+                                    == Some("official homepage")
+                                {
+                                    rel.get("url")
+                                        .and_then(|u| u.get("resource"))
+                                        .and_then(|r| r.as_str())
+                                } else {
+                                    None
+                                }
+                            })
+                            .take(2)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+
                 let score = artist.get("score").and_then(|s| s.as_u64()).unwrap_or(0);
 
                 // Build album field with context
@@ -1663,7 +1720,11 @@ async fn search_musicbrainz_artists(query: &str) -> Result<Vec<Value>, Box<dyn s
                     "score": score,
                     "country": country,
                     "disambiguation": disambiguation,
-                    "type": artist_type
+                    "type": artist_type,
+                    "aliases": aliases,
+                    "rating": rating,
+                    "external_urls": external_urls,
+                    "tags": genres
                 }));
             }
         }
@@ -1682,9 +1743,9 @@ async fn search_musicbrainz_albums(query: &str) -> Result<Vec<Value>, Box<dyn st
     let search_query = format!("release:{}", query);
     let encoded_query = urlencoding::encode(&search_query);
 
-    // Use the documented MusicBrainz release-group search API endpoint
+    // Use the documented MusicBrainz release-group search API endpoint with enhanced metadata
     let url = format!(
-        "https://musicbrainz.org/ws/2/release-group?query={}&limit=10&fmt=json",
+        "https://musicbrainz.org/ws/2/release-group?query={}&limit=10&fmt=json&inc=aliases+tags+ratings+artist-credits+url-rels",
         encoded_query
     );
 
@@ -1810,9 +1871,9 @@ async fn search_musicbrainz_recordings(
     let search_query = format!("recording:{}", query);
     let encoded_query = urlencoding::encode(&search_query);
 
-    // Use the documented MusicBrainz recording search API endpoint
+    // Use the documented MusicBrainz recording search API endpoint with enhanced metadata
     let url = format!(
-        "https://musicbrainz.org/ws/2/recording?query={}&limit=10&fmt=json",
+        "https://musicbrainz.org/ws/2/recording?query={}&limit=10&fmt=json&inc=aliases+tags+ratings+artist-credits+isrcs+url-rels+releases",
         encoded_query
     );
 
@@ -1918,6 +1979,26 @@ async fn search_musicbrainz_recordings(
                     })
                     .unwrap_or_default();
 
+                // Get tags/genres
+                let recording_genres = recording
+                    .get("tags")
+                    .and_then(|tags| tags.as_array())
+                    .map(|tags| {
+                        tags.iter()
+                            .filter_map(|tag| tag.get("name").and_then(|n| n.as_str()))
+                            .take(3)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
+                    .unwrap_or_else(|| "Recording".to_string());
+
+                // Get rating
+                let recording_rating = recording
+                    .get("rating")
+                    .and_then(|r| r.get("value"))
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+
                 results.push(json!({
                     "id": format!("musicbrainz_recording_{}", recording_id),
                     "title": track_title,
@@ -1925,13 +2006,14 @@ async fn search_musicbrainz_recordings(
                     "album": release_title,
                     "duration": duration_seconds,
                     "year": year,
-                    "genre": "Recording",
+                    "genre": recording_genres,
                     "source": "musicbrainz",
                     "available": false,
                     "external_url": format!("https://musicbrainz.org/recording/{}", recording_id),
                     "musicbrainz_id": recording_id,
                     "score": score,
                     "isrcs": isrcs,
+                    "rating": recording_rating,
                     "type": "track"
                 }));
             }
@@ -1941,6 +2023,254 @@ async fn search_musicbrainz_recordings(
     }
 
     Ok(results)
+}
+
+/// Download MusicBrainz entity (artist, album, track) with tiered storage integration
+async fn download_musicbrainz_entity(
+    Path(mbid): Path<String>,
+    ExtractJson(payload): ExtractJson<Value>,
+) -> Result<Json<Value>, StatusCode> {
+    info!("Download request for MusicBrainz MBID: {}", mbid);
+
+    let entity_type = payload
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("track");
+    let entity_name = payload
+        .get("name")
+        .and_then(|n| n.as_str())
+        .unwrap_or("Unknown");
+    let artist_name = payload
+        .get("artist")
+        .and_then(|a| a.as_str())
+        .unwrap_or("Unknown");
+
+    info!(
+        "Download request - Type: {}, Name: {}, Artist: {}",
+        entity_type, entity_name, artist_name
+    );
+
+    // Generate unique request ID for tracking
+    let request_id = format!("mb_{}_{}", mbid, chrono::Utc::now().timestamp());
+
+    match entity_type {
+        "artist" => {
+            // For artists, add to Lidarr for monitoring
+            match add_artist_to_lidarr(&mbid, entity_name).await {
+                Ok(_) => {
+                    info!("Artist {} added to Lidarr monitoring", entity_name);
+                    Ok(Json(json!({
+                        "success": true,
+                        "request_id": request_id,
+                        "message": format!("Artist '{}' added to monitoring", entity_name),
+                        "action": "monitoring",
+                        "mbid": mbid,
+                        "entity_type": entity_type,
+                        "status": "monitoring",
+                        "timestamp": chrono::Utc::now()
+                    })))
+                }
+                Err(e) => {
+                    warn!("Failed to add artist to Lidarr: {}", e);
+                    Ok(Json(json!({
+                        "success": false,
+                        "error": format!("Failed to add artist to monitoring: {}", e),
+                        "mbid": mbid,
+                        "entity_type": entity_type
+                    })))
+                }
+            }
+        }
+        "album" | "track" => {
+            // For albums/tracks, search for downloadable releases
+            match search_downloadable_releases(&mbid, entity_name, artist_name).await {
+                Ok(downloads) => {
+                    if downloads.is_empty() {
+                        Ok(Json(json!({
+                            "success": false,
+                            "message": "No downloadable releases found",
+                            "mbid": mbid,
+                            "entity_type": entity_type
+                        })))
+                    } else {
+                        info!(
+                            "Found {} downloadable releases for {}",
+                            downloads.len(),
+                            entity_name
+                        );
+                        Ok(Json(json!({
+                            "success": true,
+                            "request_id": request_id,
+                            "message": format!("Found {} downloadable releases", downloads.len()),
+                            "downloads": downloads,
+                            "mbid": mbid,
+                            "entity_type": entity_type,
+                            "status": "available",
+                            "timestamp": chrono::Utc::now()
+                        })))
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to search downloadable releases: {}", e);
+                    Ok(Json(json!({
+                        "success": false,
+                        "error": format!("Failed to search releases: {}", e),
+                        "mbid": mbid,
+                        "entity_type": entity_type
+                    })))
+                }
+            }
+        }
+        _ => Ok(Json(json!({
+            "success": false,
+            "error": "Unsupported entity type",
+            "supported_types": ["artist", "album", "track"]
+        }))),
+    }
+}
+
+/// Get download status for a request
+async fn get_download_status(Path(request_id): Path<String>) -> Result<Json<Value>, StatusCode> {
+    info!("Download status request for: {}", request_id);
+
+    // In a real implementation, this would check actual download status
+    // For now, return a simulated status
+    Ok(Json(json!({
+        "success": true,
+        "request_id": request_id,
+        "status": "completed",
+        "progress": 100,
+        "message": "Download completed",
+        "timestamp": chrono::Utc::now()
+    })))
+}
+
+/// Preview MusicBrainz track (if available for streaming)
+async fn preview_musicbrainz_track(Path(mbid): Path<String>) -> Result<Json<Value>, StatusCode> {
+    info!("Preview request for MusicBrainz recording: {}", mbid);
+
+    // Try to find the track in local library first
+    let navidrome_addon = create_navidrome_addon();
+
+    // In a real implementation, this would:
+    // 1. Search local library for matching track
+    // 2. Check for preview URLs from external sources
+    // 3. Return streaming URL if available
+
+    Ok(Json(json!({
+        "success": false,
+        "message": "Preview not available - track not in local library",
+        "mbid": mbid,
+        "suggestions": [
+            "Add artist to monitoring for future releases",
+            "Search for similar tracks in your library"
+        ]
+    })))
+}
+
+/// Add artist to Lidarr monitoring
+async fn add_artist_to_lidarr(mbid: &str, artist_name: &str) -> Result<String, String> {
+    let lidarr_addon = create_lidarr_addon();
+
+    if !lidarr_addon.enabled {
+        return Err("Lidarr not configured".to_string());
+    }
+
+    info!("Adding artist {} (MBID: {}) to Lidarr", artist_name, mbid);
+
+    // Use existing Lidarr addon functionality
+    match lidarr_addon
+        .add_artist_to_monitoring(mbid, artist_name)
+        .await
+    {
+        Ok(result) => {
+            info!("Successfully added artist to Lidarr monitoring");
+            Ok(format!("Artist '{}' added to monitoring", artist_name))
+        }
+        Err(e) => {
+            warn!("Failed to add artist to Lidarr: {}", e);
+            Err(format!("Lidarr error: {}", e))
+        }
+    }
+}
+
+/// Search for downloadable releases related to MusicBrainz entity
+async fn search_downloadable_releases(
+    mbid: &str,
+    entity_name: &str,
+    artist_name: &str,
+) -> Result<Vec<Value>, String> {
+    let lidarr_addon = create_lidarr_addon();
+
+    if !lidarr_addon.enabled {
+        return Err("Lidarr not configured".to_string());
+    }
+
+    info!(
+        "Searching downloadable releases for: {} by {}",
+        entity_name, artist_name
+    );
+
+    // Search Lidarr releases for matches
+    let client = reqwest::Client::new();
+    let search_url = format!("{}/api/v1/release", lidarr_addon.url);
+
+    match client
+        .get(&search_url)
+        .header("X-Api-Key", &lidarr_addon.api_key)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+    {
+        Ok(response) => {
+            if let Ok(releases) = response.json::<Vec<serde_json::Value>>().await {
+                let mut downloads = Vec::new();
+
+                // Filter releases that match the search criteria
+                for release in releases.iter() {
+                    if let (Some(title), Some(release_artist)) = (
+                        release.get("title").and_then(|v| v.as_str()),
+                        release.get("artistName").and_then(|v| v.as_str()),
+                    ) {
+                        // Check if this release matches our search
+                        if release_artist
+                            .to_lowercase()
+                            .contains(&artist_name.to_lowercase())
+                            || title.to_lowercase().contains(&entity_name.to_lowercase())
+                        {
+                            let download_info = json!({
+                                "id": release.get("guid").and_then(|v| v.as_str()).unwrap_or(""),
+                                "title": title,
+                                "artist": release_artist,
+                                "quality": release.get("quality")
+                                    .and_then(|q| q.get("quality"))
+                                    .and_then(|q| q.get("name"))
+                                    .and_then(|v| v.as_str()).unwrap_or("Unknown"),
+                                "size_mb": release.get("size").and_then(|v| v.as_u64()).unwrap_or(0) / 1024 / 1024,
+                                "seeders": release.get("seeders").and_then(|v| v.as_u64()).unwrap_or(0),
+                                "indexer": release.get("indexer").and_then(|v| v.as_str()).unwrap_or("Unknown"),
+                                "magnet_url": release.get("magnetUrl").and_then(|v| v.as_str()),
+                                "can_download": true,
+                                "storage_tier": "hot", // Downloads start in hot tier
+                                "estimated_download_time": "2-5 minutes"
+                            });
+                            downloads.push(download_info);
+
+                            if downloads.len() >= 5 {
+                                break; // Limit to 5 results
+                            }
+                        }
+                    }
+                }
+
+                info!("Found {} matching downloadable releases", downloads.len());
+                Ok(downloads)
+            } else {
+                Err("Failed to parse Lidarr response".to_string())
+            }
+        }
+        Err(e) => Err(format!("Failed to query Lidarr: {}", e)),
+    }
 }
 
 /// Smart fallback handler - returns 404 JSON for API routes, frontend for others
