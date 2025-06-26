@@ -1217,45 +1217,107 @@ async fn global_search(Path(query): Path<String>) -> Result<Json<Value>, StatusC
     info!("Lidarr configured check: {}", lidarr_configured);
 
     if lidarr_configured {
-        info!("Starting Lidarr artist search for query: {}", query);
+        info!("Starting Lidarr release search for query: {}", query);
         let lidarr_addon = create_lidarr_addon();
         info!(
             "Lidarr addon created - URL: '{}', enabled: {}",
             lidarr_addon.url, lidarr_addon.enabled
         );
 
-        // Use the proper search_artist method
-        match lidarr_addon.search_artist(&query).await {
-            Ok(artists) => {
-                info!("Lidarr returned {} artists", artists.len());
-                for artist in artists.iter().take(10) {
-                    // Limit to top 10 results
-                    let artist_name = &artist.artist_name;
-                    let overview = artist.overview.as_deref().unwrap_or("");
-                    let genres = artist.genres.as_deref().unwrap_or(&[]).join(", ");
-                    let disambiguation = artist.disambiguation.as_deref().unwrap_or("");
+        // Search for releases by artist name using internal database
+        let lidarr_url = lidarr_addon.url.clone();
+        let api_key = lidarr_addon.api_key.clone();
 
-                    let foreign_id = &artist.foreign_artist_id;
+        let client = reqwest::Client::new();
+        let search_url = format!("{}/api/v1/release", lidarr_url);
 
-                    results.push(json!({
-                        "id": format!("lidarr_{}", foreign_id),
-                        "title": artist_name,
-                        "artist": artist_name,
-                        "album": if disambiguation.is_empty() { "Artist" } else { disambiguation },
-                        "duration": null,
-                        "year": null,
-                        "genre": if genres.is_empty() { "Unknown" } else { &genres },
-                        "source": "lidarr",
-                        "available": false,
-                        "downloadable": true,
-                        "overview": overview,
-                        "foreign_artist_id": foreign_id,
-                        "external_url": format!("https://musicbrainz.org/artist/{}", foreign_id)
-                    }));
+        match client
+            .get(&search_url)
+            .header("X-Api-Key", &api_key)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                info!("Lidarr API response status: {}", response.status());
+                if let Ok(releases) = response.json::<Vec<serde_json::Value>>().await {
+                    info!("Lidarr returned {} total releases", releases.len());
+
+                    // Filter releases to match the search query
+                    let query_lower = query.to_lowercase();
+                    let mut matched_releases = 0;
+
+                    for release in releases.iter() {
+                        if matched_releases >= 10 {
+                            break;
+                        } // Limit to top 10 results
+
+                        if let (Some(title), Some(artist)) = (
+                            release.get("title").and_then(|v| v.as_str()),
+                            release.get("artistName").and_then(|v| v.as_str()),
+                        ) {
+                            // Filter: only include releases where artist name contains the search query
+                            if artist.to_lowercase().contains(&query_lower)
+                                || title.to_lowercase().contains(&query_lower)
+                            {
+                                let quality = release
+                                    .get("quality")
+                                    .and_then(|q| q.get("quality"))
+                                    .and_then(|q| q.get("name"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Unknown");
+
+                                let album_title = release
+                                    .get("albumTitle")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Unknown Album");
+                                let size_bytes =
+                                    release.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let size_mb = size_bytes / 1024 / 1024;
+                                let seeders =
+                                    release.get("seeders").and_then(|v| v.as_u64()).unwrap_or(0);
+                                let leechers = release
+                                    .get("leechers")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                                let magnet_url = release.get("magnetUrl").and_then(|v| v.as_str());
+                                let indexer = release
+                                    .get("indexer")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Unknown");
+
+                                results.push(json!({
+                                    "id": format!("lidarr_{}", release.get("guid").and_then(|v| v.as_str()).unwrap_or("unknown")),
+                                    "title": format!("{} [{}]", album_title, quality),
+                                    "artist": artist,
+                                    "album": album_title,
+                                    "duration": null,
+                                    "year": null,
+                                    "genre": quality,
+                                    "source": "lidarr",
+                                    "available": false,
+                                    "downloadable": true,
+                                    "quality": quality,
+                                    "size_mb": size_mb,
+                                    "seeders": seeders,
+                                    "leechers": leechers,
+                                    "indexer": indexer,
+                                    "magnet_url": magnet_url,
+                                    "download_url": magnet_url,
+                                    "external_url": magnet_url
+                                }));
+
+                                matched_releases += 1;
+                            }
+                        }
+                    }
+                    info!(
+                        "Lidarr filtered to {} matching releases for query: {}",
+                        matched_releases, query
+                    );
                 }
             }
             Err(e) => {
-                warn!("Failed to search Lidarr artists: {}", e);
+                warn!("Failed to search Lidarr releases: {}", e);
             }
         }
     } else {
