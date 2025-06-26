@@ -17,24 +17,28 @@
     let sortBy = "relevance"; // 'relevance', 'popularity', 'year', 'duration'
     let downloadRequests = new Map(); // Track download request status
 
-    // Search timeout for debouncing
-    let searchTimeout = null;
+    // No more debouncing - search only on submit/enter
 
     onMount(() => {
         mounted = true;
     });
 
-    // Debounced search function
-    function handleSearchInput() {
-        clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(() => {
-            if (searchQuery.trim().length >= 2) {
-                performSearch(searchQuery.trim());
-            } else {
-                searchResults = [];
-                searchError = null;
-            }
-        }, 300);
+    // Handle Enter key press
+    function handleKeyDown(event) {
+        if (event.key === "Enter") {
+            handleSearchSubmit();
+        }
+    }
+
+    // Handle search submit (Enter key or button click)
+    function handleSearchSubmit() {
+        const query = searchQuery.trim();
+        if (query.length >= 2) {
+            performSearch(query);
+        } else {
+            searchResults = [];
+            searchError = null;
+        }
     }
 
     // Main search function
@@ -188,15 +192,15 @@
 
     // Handle search type change
     function handleSearchTypeChange() {
-        if (searchQuery.trim().length >= 2) {
-            performSearch(searchQuery.trim());
+        if (searchQuery.length >= 2 && searchResults.length > 0) {
+            handleSearchSubmit();
         }
     }
 
     // Handle sort change
     function handleSearchCategoryChange() {
-        if (searchQuery.length >= 2) {
-            handleSearchInput();
+        if (searchQuery.length >= 2 && searchResults.length > 0) {
+            handleSearchSubmit();
         }
     }
 
@@ -228,8 +232,9 @@
                     type="text"
                     class="search-input"
                     bind:value={searchQuery}
-                    on:input={handleSearchInput}
+                    on:keydown={handleKeyDown}
                     {placeholder}
+                    autocomplete="off"
                 />
                 <div class="search-icon">🔍</div>
                 {#if searchQuery}
@@ -243,6 +248,19 @@
                     </div>
                 {/if}
             </div>
+
+            <!-- Search Submit Button -->
+            <button
+                class="search-submit-btn"
+                on:click={handleSearchSubmit}
+                disabled={searchQuery.trim().length < 2 || isSearching}
+            >
+                {#if isSearching}
+                    Searching...
+                {:else}
+                    Search
+                {/if}
+            </button>
         </div>
 
         <!-- Search Filters -->
@@ -582,12 +600,16 @@
 
     .search-input-container {
         margin-bottom: 20px;
+        display: flex;
+        gap: 12px;
+        align-items: stretch;
     }
 
     .search-input-wrapper {
         position: relative;
+        width: 100%;
         max-width: 600px;
-        margin: 0 auto;
+        flex: 1;
     }
 
     .search-input {
@@ -637,6 +659,34 @@
 
     .clear-search-btn:hover {
         background: rgba(255, 107, 157, 0.2);
+    }
+
+    .search-submit-btn {
+        background: linear-gradient(135deg, #ff6b9d, #00ffff);
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        white-space: nowrap;
+        min-width: 100px;
+        height: 48px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .search-submit-btn:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0, 255, 255, 0.3);
+    }
+
+    .search-submit-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
     }
 
     .search-loading {

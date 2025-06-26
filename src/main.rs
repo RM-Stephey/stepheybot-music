@@ -1335,8 +1335,18 @@ async fn global_search(
 
     // Search external sources based on search type
     if search_type == "global" || search_type == "external" {
+        info!(
+            "External search enabled - calling search_external_apis with query='{}', category='{}'",
+            query, search_category
+        );
         let external_results = search_external_apis(&query, search_category).await;
+        info!(
+            "External search returned {} results",
+            external_results.len()
+        );
         results.extend(external_results);
+    } else {
+        info!("External search disabled (search_type='{}')", search_type);
     }
 
     // Generate sources dynamically from actual results
@@ -1446,33 +1456,96 @@ async fn request_download(
 
 /// Helper function to search external APIs
 async fn search_external_apis(query: &str, category: &str) -> Vec<Value> {
+    info!("=== EXTERNAL API SEARCH START ===");
+    info!("Query: '{}', Category: '{}'", query, category);
     let mut results = Vec::new();
 
     // Search MusicBrainz based on category
+    info!("Starting MusicBrainz search for category: {}", category);
     match category {
         "artist" => {
-            if let Ok(musicbrainz_results) = search_musicbrainz_artists(query).await {
-                results.extend(musicbrainz_results);
+            info!("Searching MusicBrainz artists for: {}", query);
+            match search_musicbrainz_artists(query).await {
+                Ok(musicbrainz_results) => {
+                    info!(
+                        "MusicBrainz artists search returned {} results",
+                        musicbrainz_results.len()
+                    );
+                    results.extend(musicbrainz_results);
+                }
+                Err(e) => {
+                    warn!("MusicBrainz artists search failed: {}", e);
+                }
             }
         }
         "album" => {
-            if let Ok(musicbrainz_results) = search_musicbrainz_albums(query).await {
-                results.extend(musicbrainz_results);
+            info!("Searching MusicBrainz albums for: {}", query);
+            match search_musicbrainz_albums(query).await {
+                Ok(musicbrainz_results) => {
+                    info!(
+                        "MusicBrainz albums search returned {} results",
+                        musicbrainz_results.len()
+                    );
+                    results.extend(musicbrainz_results);
+                }
+                Err(e) => {
+                    warn!("MusicBrainz albums search failed: {}", e);
+                }
             }
         }
         "track" => {
-            if let Ok(musicbrainz_results) = search_musicbrainz_recordings(query).await {
-                results.extend(musicbrainz_results);
+            info!("Searching MusicBrainz recordings for: {}", query);
+            match search_musicbrainz_recordings(query).await {
+                Ok(musicbrainz_results) => {
+                    info!(
+                        "MusicBrainz recordings search returned {} results",
+                        musicbrainz_results.len()
+                    );
+                    results.extend(musicbrainz_results);
+                }
+                Err(e) => {
+                    warn!("MusicBrainz recordings search failed: {}", e);
+                }
             }
         }
         "all" | _ => {
+            info!("Searching MusicBrainz all categories for: {}", query);
             // Search all categories
-            if let Ok(musicbrainz_results) = search_musicbrainz_artists(query).await {
-                results.extend(musicbrainz_results);
+            info!("Searching MusicBrainz artists...");
+            match search_musicbrainz_artists(query).await {
+                Ok(musicbrainz_results) => {
+                    info!(
+                        "MusicBrainz artists search returned {} results",
+                        musicbrainz_results.len()
+                    );
+                    results.extend(musicbrainz_results);
+                }
+                Err(e) => {
+                    warn!("MusicBrainz artists search failed: {}", e);
+                }
             }
-            if let Ok(musicbrainz_results) = search_musicbrainz_albums(query).await {
-                results.extend(musicbrainz_results);
+
+            info!("Searching MusicBrainz albums...");
+            match search_musicbrainz_albums(query).await {
+                Ok(musicbrainz_results) => {
+                    info!(
+                        "MusicBrainz albums search returned {} results",
+                        musicbrainz_results.len()
+                    );
+                    results.extend(musicbrainz_results);
+                }
+                Err(e) => {
+                    warn!("MusicBrainz albums search failed: {}", e);
+                }
             }
+        }
+    }
+
+    info!("=== EXTERNAL API SEARCH END ===");
+    info!("Total external results: {}", results.len());
+    for (i, result) in results.iter().enumerate() {
+        if let (Some(title), Some(source)) = (result.get("title"), result.get("source")) {
+            info!("External result {}: {} from {}", i + 1, title, source);
         }
     }
 
