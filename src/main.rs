@@ -17,7 +17,9 @@ use axum::{
     Router,
 };
 use chrono::Utc;
-use lidarr_addon::{create_lidarr_addon, get_lidarr_connection_status, test_lidarr_integration};
+use lidarr_addon::{
+    create_lidarr_addon, get_lidarr_connection_status, test_lidarr_integration, LidarrSearchResult,
+};
 use navidrome_addon::{create_navidrome_addon, get_connection_status, test_navidrome_integration};
 use rand::random;
 use serde_json::{json, Value};
@@ -2178,13 +2180,36 @@ async fn add_artist_to_lidarr(mbid: &str, artist_name: &str) -> Result<String, S
 
     info!("Adding artist {} (MBID: {}) to Lidarr", artist_name, mbid);
 
-    // Use existing Lidarr addon functionality
+    // Get Lidarr configuration dynamically
+    let config = get_lidarr_configuration(&lidarr_addon).await?;
+
+    // Create a proper LidarrSearchResult for the artist
+    let search_result = LidarrSearchResult {
+        foreign_artist_id: mbid.to_string(),
+        artist_name: artist_name.to_string(),
+        overview: None,
+        disambiguation: None,
+        images: None,
+        links: None,
+        genres: None,
+        ratings: None,
+    };
+
+    // Use the proper add_artist method with dynamic configuration
     match lidarr_addon
-        .add_artist_to_monitoring(mbid, artist_name)
+        .add_artist(
+            &search_result,
+            config.quality_profile_id,
+            config.metadata_profile_id,
+            &config.root_folder_path,
+        )
         .await
     {
         Ok(result) => {
-            info!("Successfully added artist to Lidarr monitoring");
+            info!(
+                "Successfully added artist to Lidarr monitoring: {:?}",
+                result.artist_name
+            );
             Ok(format!("Artist '{}' added to monitoring", artist_name))
         }
         Err(e) => {
@@ -2192,6 +2217,93 @@ async fn add_artist_to_lidarr(mbid: &str, artist_name: &str) -> Result<String, S
             Err(format!("Lidarr error: {}", e))
         }
     }
+}
+
+/// Get Lidarr configuration (quality profiles, metadata profiles, root folders)
+async fn get_lidarr_configuration(
+    lidarr_addon: &crate::lidarr_addon::LidarrAddon,
+) -> Result<LidarrConfig, String> {
+    let client = reqwest::Client::new();
+
+    // Get quality profiles
+    let quality_url = format!("{}/api/v1/qualityprofile", lidarr_addon.url);
+    let quality_response = client
+        .get(&quality_url)
+        .header("X-Api-Key", &lidarr_addon.api_key)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to get quality profiles: {}", e))?;
+
+    let quality_profiles: Vec<serde_json::Value> = quality_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse quality profiles: {}", e))?;
+
+    let quality_profile_id = quality_profiles
+        .first()
+        .and_then(|q| q.get("id").and_then(|id| id.as_u64()))
+        .ok_or("No quality profiles found")? as u32;
+
+    // Get metadata profiles
+    let metadata_url = format!("{}/api/v1/metadataprofile", lidarr_addon.url);
+    let metadata_response = client
+        .get(&metadata_url)
+        .header("X-Api-Key", &lidarr_addon.api_key)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to get metadata profiles: {}", e))?;
+
+    let metadata_profiles: Vec<serde_json::Value> = metadata_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse metadata profiles: {}", e))?;
+
+    let metadata_profile_id = metadata_profiles
+        .first()
+        .and_then(|m| m.get("id").and_then(|id| id.as_u64()))
+        .ok_or("No metadata profiles found")? as u32;
+
+    // Get root folders
+    let root_url = format!("{}/api/v1/rootfolder", lidarr_addon.url);
+    let root_response = client
+        .get(&root_url)
+        .header("X-Api-Key", &lidarr_addon.api_key)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("Failed to get root folders: {}", e))?;
+
+    let root_folders: Vec<serde_json::Value> = root_response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse root folders: {}", e))?;
+
+    let root_folder_path = root_folders
+        .first()
+        .and_then(|r| r.get("path").and_then(|path| path.as_str()))
+        .ok_or("No root folders found")?
+        .to_string();
+
+    info!(
+        "Lidarr configuration: Quality Profile ID: {}, Metadata Profile ID: {}, Root Folder: {}",
+        quality_profile_id, metadata_profile_id, root_folder_path
+    );
+
+    Ok(LidarrConfig {
+        quality_profile_id,
+        metadata_profile_id,
+        root_folder_path,
+    })
+}
+
+/// Lidarr configuration structure
+#[derive(Debug)]
+struct LidarrConfig {
+    quality_profile_id: u32,
+    metadata_profile_id: u32,
+    root_folder_path: String,
 }
 
 /// Search for downloadable releases related to MusicBrainz entity
