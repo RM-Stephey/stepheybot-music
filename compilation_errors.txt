@@ -1,0 +1,85 @@
+ --> src/clients/musicbrainz.rs:7:14
+  --> src/clients/musicbrainz.rs:10:5
+  --> src/clients/musicbrainz.rs:15:22
+ --> src/clients/navidrome.rs:9:23
+  --> src/clients/navidrome.rs:11:11
+  --> src/clients/navidrome.rs:13:22
+ --> src/clients/qbittorrent.rs:7:14
+  --> src/clients/mod.rs:13:9
+  --> src/clients/mod.rs:14:9
+  --> src/clients/mod.rs:15:9
+  --> src/clients/mod.rs:16:9
+  --> src/clients/mod.rs:17:9
+ --> src/models/mod.rs:9:9
+  --> src/models/mod.rs:12:13
+  --> src/models/mod.rs:13:5
+  --> src/services/download_service.rs:13:29
+  --> src/services/download_service.rs:14:15
+  --> src/services/download_service.rs:17:31
+ --> src/services/playlist.rs:7:14
+ --> src/services/playlist.rs:8:5
+  --> src/services/playlist.rs:10:22
+  --> src/services/playlist.rs:14:41
+  --> src/services/recommendation.rs:11:44
+  --> src/services/recommendation.rs:15:5
+  --> src/services/recommendation.rs:19:35
+  --> src/services/recommendation.rs:26:13
+ --> src/services/storage.rs:7:35
+ --> src/services/sync.rs:8:5
+  --> src/services/mod.rs:27:9
+  --> src/utils.rs:10:5
+    --> src/main.rs:2343:9
+    --> src/main.rs:2499:5
+error[E0716]: temporary value dropped while borrowed
+   --> src/clients/musicbrainz.rs:345:34
+error[E0716]: temporary value dropped while borrowed
+   --> src/clients/musicbrainz.rs:381:34
+error[E0716]: temporary value dropped while borrowed
+   --> src/clients/musicbrainz.rs:417:34
+error[E0716]: temporary value dropped while borrowed
+   --> src/clients/musicbrainz.rs:449:36
+error[E0716]: temporary value dropped while borrowed
+   --> src/clients/musicbrainz.rs:480:36
+error[E0716]: temporary value dropped while borrowed
+   --> src/clients/musicbrainz.rs:515:36
+error[E0382]: borrow of moved value: `images`
+   --> src/clients/musicbrainz.rs:592:12
+   --> /usr/src/debug/rust/rustc-1.87.0-src/library/core/src/iter/traits/collect.rs:313:18
+error[E0283]: type annotations needed for `SubsonicResponse<_>`
+   --> src/clients/navidrome.rs:336:13
+   --> src/clients/navidrome.rs:797:12
+error[E0597]: `s_str` does not live long enough
+   --> src/clients/navidrome.rs:413:34
+error[E0597]: `o_str` does not live long enough
+   --> src/clients/navidrome.rs:417:36
+error[E0308]: mismatched types
+   --> src/clients/navidrome.rs:449:35
+error[E0308]: mismatched types
+   --> src/clients/navidrome.rs:461:49
+   --> src/clients/navidrome.rs:791:14
+error[E0597]: `ac_str` does not live long enough
+   --> src/clients/navidrome.rs:481:41
+error[E0597]: `alc_str` does not live long enough
+   --> src/clients/navidrome.rs:485:40
+error[E0597]: `sc_str` does not live long enough
+   --> src/clients/navidrome.rs:489:39
+   --> src/clients/navidrome.rs:605:9
+error[E0716]: temporary value dropped while borrowed
+   --> src/clients/navidrome.rs:645:35
+   --> src/clients/navidrome.rs:678:9
+   --> src/clients/navidrome.rs:679:9
+error[E0382]: borrow of moved value: `response`
+   --> src/clients/qbittorrent.rs:227:17
+   --> /home/th3tn/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/reqwest-0.11.27/src/async_impl/response.rs:147:23
+error[E0599]: no method named `health_check` found for struct `Arc<RecommendationService>` in the current scope
+   --> src/services/mod.rs:114:53
+error[E0599]: no method named `get_stats` found for struct `Arc<RecommendationService>` in the current scope
+   --> src/services/mod.rs:133:56
+   --> src/services/mod.rs:236:1
+error[E0599]: no method named `shutdown` found for struct `Arc<RecommendationService>` in the current scope
+   --> src/services/mod.rs:160:45
+   --> src/services/playlist.rs:320:13
+   --> src/services/recommendation.rs:405:9
+   --> src/services/download_service.rs:577:9
+error[E0733]: recursion in an async fn requires boxing
+   --> src/services/library.rs:123:5

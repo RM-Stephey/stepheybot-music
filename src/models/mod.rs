@@ -4,9 +4,11 @@
 //! including database entities, API request/response types, and utility types.
 
 pub mod entities;
+pub mod user;
 
 // Re-export commonly used types
 pub use entities::*;
+pub use user::*;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

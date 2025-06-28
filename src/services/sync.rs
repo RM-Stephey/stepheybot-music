@@ -34,7 +34,7 @@ pub struct UserSyncResult {
 }
 
 /// Sync operation result
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SyncOperationResult {
     pub total_users_processed: u32,
     pub successful_syncs: u32,

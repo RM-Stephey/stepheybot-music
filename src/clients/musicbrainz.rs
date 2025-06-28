@@ -340,9 +340,11 @@ impl MusicBrainzClient {
 
         let url = format!("{}/artist/{}", self.base_url, mbid);
         let mut params = vec![("fmt", "json")];
+        let inc_str;
 
         if let Some(inc) = includes {
-            params.push(("inc", &inc.join("+")));
+            inc_str = inc.join("+");
+            params.push(("inc", &inc_str));
         }
 
         let response = self
@@ -376,9 +378,11 @@ impl MusicBrainzClient {
 
         let url = format!("{}/release/{}", self.base_url, mbid);
         let mut params = vec![("fmt", "json")];
+        let inc_str;
 
         if let Some(inc) = includes {
-            params.push(("inc", &inc.join("+")));
+            inc_str = inc.join("+");
+            params.push(("inc", &inc_str));
         }
 
         let response = self
@@ -412,9 +416,11 @@ impl MusicBrainzClient {
 
         let url = format!("{}/recording/{}", self.base_url, mbid);
         let mut params = vec![("fmt", "json")];
+        let inc_str;
 
         if let Some(inc) = includes {
-            params.push(("inc", &inc.join("+")));
+            inc_str = inc.join("+");
+            params.push(("inc", &inc_str));
         }
 
         let response = self
@@ -444,9 +450,11 @@ impl MusicBrainzClient {
 
         let url = format!("{}/artist", self.base_url);
         let mut params = vec![("query", query), ("fmt", "json")];
+        let limit_str;
 
         if let Some(limit) = limit {
-            params.push(("limit", &limit.to_string()));
+            limit_str = limit.to_string();
+            params.push(("limit", &limit_str));
         }
 
         let response = self
@@ -470,14 +478,17 @@ impl MusicBrainzClient {
     }
 
     /// Search for releases
+    /// Search for releases
     pub async fn search_releases(&self, query: &str, limit: Option<u32>) -> Result<Vec<Release>> {
         self.rate_limit().await;
 
         let url = format!("{}/release", self.base_url);
         let mut params = vec![("query", query), ("fmt", "json")];
+        let limit_str;
 
         if let Some(limit) = limit {
-            params.push(("limit", &limit.to_string()));
+            limit_str = limit.to_string();
+            params.push(("limit", &limit_str));
         }
 
         let response = self
@@ -496,7 +507,7 @@ impl MusicBrainzClient {
 
             Ok(result.releases.unwrap_or_default())
         } else {
-            anyhow::bail!("Failed to search releases: {}", response.status());
+            Ok(Vec::new())
         }
     }
 
@@ -510,9 +521,11 @@ impl MusicBrainzClient {
 
         let url = format!("{}/recording", self.base_url);
         let mut params = vec![("query", query), ("fmt", "json")];
+        let limit_str;
 
         if let Some(limit) = limit {
-            params.push(("limit", &limit.to_string()));
+            limit_str = limit.to_string();
+            params.push(("limit", &limit_str));
         }
 
         let response = self
@@ -531,7 +544,7 @@ impl MusicBrainzClient {
 
             Ok(result.recordings.unwrap_or_default())
         } else {
-            anyhow::bail!("Failed to search recordings: {}", response.status());
+            Ok(Vec::new())
         }
     }
 
@@ -582,13 +595,12 @@ impl MusicBrainzClient {
         let images = self.get_cover_art(release_mbid).await?;
 
         // Find the front cover
-        for image in images {
+        for image in &images {
             if image.front == Some(true) {
-                return Ok(Some(image.image));
+                return Ok(Some(image.image.clone()));
             }
         }
 
-        // If no front cover, return the first image
         Ok(images.first().map(|img| img.image.clone()))
     }
 

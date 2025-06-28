@@ -8,7 +8,8 @@
 //! - Machine learning for pattern recognition
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Duration, Utc};
+use async_trait::async_trait;
+use chrono::{DateTime, Datelike, Duration, Local, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
@@ -17,6 +18,18 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
+
+/// Statistics for the recommendation service
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RecommendationStats {
+    pub total_recommendations: u64,
+    pub recommendations_consumed: u64,
+    pub average_score: f64,
+    pub last_generation: Option<DateTime<Utc>>,
+    pub active_users: u64,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+}
 
 use crate::{
     clients::{listenbrainz::ListenBrainzClient, musicbrainz::MusicBrainzClient},
@@ -105,6 +118,7 @@ pub struct RecommendationService {
     user_similarities: Arc<RwLock<HashMap<String, Vec<UserSimilarity>>>>,
     track_features: Arc<RwLock<HashMap<String, TrackFeatures>>>,
     popularity_cache: Arc<RwLock<HashMap<String, f64>>>,
+    stats: Arc<RwLock<RecommendationStats>>,
 }
 
 impl RecommendationService {
@@ -130,6 +144,7 @@ impl RecommendationService {
             user_similarities: Arc::new(RwLock::new(HashMap::new())),
             track_features: Arc::new(RwLock::new(HashMap::new())),
             popularity_cache: Arc::new(RwLock::new(HashMap::new())),
+            stats: Arc::new(RwLock::new(RecommendationStats::default())),
         })
     }
 
@@ -187,7 +202,7 @@ impl RecommendationService {
 
         // Get user's preferences and listening patterns
         let user_tracks = self.get_user_track_history(user_id, 1000).await?;
-        let user_ratings = self.get_user_ratings(user_id).await?;
+        let _user_ratings = self.get_user_ratings(user_id).await?;
         let banned_tracks = self.get_banned_tracks(user_id).await?;
 
         let mut all_recommendations = Vec::new();
@@ -267,7 +282,8 @@ impl RecommendationService {
         user_tracks: &[String],
     ) -> Result<Vec<RecommendationResult>> {
         let similarities = self.user_similarities.read().await;
-        let similar_users = similarities.get(user_id).unwrap_or(&Vec::new());
+        let empty_vec = Vec::new();
+        let similar_users = similarities.get(user_id).unwrap_or(&empty_vec);
 
         let mut recommendations = Vec::new();
         let mut track_scores: HashMap<String, f64> = HashMap::new();
@@ -310,7 +326,7 @@ impl RecommendationService {
     /// Generate content-based recommendations
     async fn generate_content_based_recommendations(
         &self,
-        user_id: &str,
+        _user_id: &str,
         user_tracks: &[String],
     ) -> Result<Vec<RecommendationResult>> {
         let track_features = self.track_features.read().await;
@@ -444,7 +460,7 @@ impl RecommendationService {
         let mut recommendations = Vec::new();
 
         // Get recently added tracks
-        let recent_tracks = self.get_recent_tracks(30).await?;
+        let recent_tracks = self.get_trending_tracks(30).await?;
 
         // Get user's artist preferences
         let preferred_artists = self.get_user_preferred_artists(user_id).await?;
@@ -877,20 +893,20 @@ impl RecommendationService {
         Ok(Vec::new())
     }
 
-    async fn get_recent_tracks(&self, days: u32) -> Result<Vec<crate::models::entities::Track>> {
+    async fn get_trending_tracks(&self, _days: u32) -> Result<Vec<crate::models::entities::Track>> {
         // Placeholder - would fetch recent tracks from database
         Ok(Vec::new())
     }
 
     async fn get_user_preferred_artists(
         &self,
-        user_id: &str,
+        _user_id: &str,
     ) -> Result<std::collections::HashSet<String>> {
         // Placeholder - would get user's preferred artists
         Ok(std::collections::HashSet::new())
     }
 
-    async fn analyze_temporal_patterns(&self, user_id: &str) -> Result<Vec<TemporalPattern>> {
+    async fn analyze_temporal_patterns(&self, _user_id: &str) -> Result<Vec<TemporalPattern>> {
         // Placeholder for temporal pattern analysis
         Ok(Vec::new())
     }
@@ -924,6 +940,29 @@ pub struct TemporalPattern {
     pub hour_of_day: u32,
     pub day_of_week: chrono::Weekday,
     pub confidence: f64,
+}
+
+/// Service trait implementation for RecommendationService
+#[async_trait::async_trait]
+impl crate::services::Service for RecommendationService {
+    type Stats = RecommendationStats;
+
+    async fn health_check(&self) -> Result<()> {
+        // Basic health check - verify internal state is valid
+        let _stats = self.stats.read().await;
+        Ok(())
+    }
+
+    async fn get_stats(&self) -> Result<Self::Stats> {
+        let stats = self.stats.read().await;
+        Ok(stats.clone())
+    }
+
+    async fn shutdown(&self) -> Result<()> {
+        // Cleanup any background tasks or resources
+        info!("Shutting down recommendation service");
+        Ok(())
+    }
 }
 
 impl TemporalPattern {

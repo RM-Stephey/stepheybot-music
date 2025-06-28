@@ -18,11 +18,14 @@
     let downloadRequests = new Map(); // Track download request status
     let previewRequests = new Map(); // Track preview request status
     let activeDownloads = new Map(); // Track active downloads
+    let downloadStatuses = new Map(); // Track detailed download status from API
 
     // No more debouncing - search only on submit/enter
 
     onMount(() => {
         mounted = true;
+        // Start polling for download status updates
+        startDownloadStatusPolling();
     });
 
     // Handle Enter key press
@@ -149,7 +152,8 @@
                     title: track.title,
                     artist: track.artist,
                     album: track.album,
-                    external_id: track.id,
+                    external_id:
+                        track.magnet_url || track.external_id || track.id,
                     source: track.source,
                 }),
             });
@@ -158,6 +162,15 @@
 
             if (data.success) {
                 downloadRequests.set(requestId, "monitoring");
+                // Store the actual request ID for status tracking
+                if (data.request_id) {
+                    downloadStatuses.set(requestId, {
+                        request_id: data.request_id,
+                        status: data.status || "queued",
+                        artist_name: track.artist,
+                        track_title: track.title,
+                    });
+                }
                 console.log("Download request successful:", data.message);
             } else {
                 downloadRequests.set(requestId, "failed");
@@ -174,7 +187,238 @@
     // Get download status for a track
     function getDownloadStatus(track) {
         const requestId = `${track.artist}-${track.title}`;
+        const detailedStatus = downloadStatuses.get(requestId);
+        if (detailedStatus) {
+            return detailedStatus.status;
+        }
         return downloadRequests.get(requestId) || null;
+    }
+
+    // Start polling for download status updates
+    function startDownloadStatusPolling() {
+        setInterval(async () => {
+            await updateDownloadStatuses();
+        }, 5000); // Poll every 5 seconds
+    }
+
+    // Update download statuses from API
+    async function updateDownloadStatuses() {
+        for (const [requestId, statusData] of downloadStatuses.entries()) {
+            if (
+                statusData.request_id &&
+                (statusData.status === "queued" ||
+                    statusData.status === "downloading")
+            ) {
+                try {
+                    const response = await fetch(
+                        `/api/v1/download/status/${statusData.request_id}`,
+                    );
+                    const data = await response.json();
+
+                    if (data.success) {
+                        statusData.status = data.status;
+                        statusData.progress = data.progress || 0;
+                        statusData.download_speed = data.download_speed;
+                        statusData.file_size = data.file_size;
+                        statusData.torrent_hash = data.torrent_hash;
+                        downloadStatuses.set(requestId, statusData);
+
+                        // Update the main status map
+                        if (data.status === "completed") {
+                            downloadRequests.set(requestId, "completed");
+                        } else if (data.status === "downloading") {
+                            downloadRequests.set(requestId, "downloading");
+                        } else if (
+                            data.status === "failed" ||
+                            data.status === "error"
+                        ) {
+                            downloadRequests.set(requestId, "failed");
+                        }
+
+                        // Trigger reactivity
+                        downloadStatuses = downloadStatuses;
+                        downloadRequests = downloadRequests;
+                    }
+                } catch (error) {
+                    console.error("Failed to update download status:", error);
+                }
+            }
+        }
+    }
+
+    // Pause a download
+    async function pauseDownload(track) {
+        const requestId = `${track.artist}-${track.title}`;
+        const statusData = downloadStatuses.get(requestId);
+
+        if (statusData && statusData.torrent_hash) {
+            try {
+                const response = await fetch(
+                    `/api/v1/download/pause/${statusData.torrent_hash}`,
+                    {
+                        method: "POST",
+                    },
+                );
+                const data = await response.json();
+
+                if (data.success) {
+                    console.log("Download paused successfully");
+                    updateDownloadStatuses();
+                }
+            } catch (error) {
+                console.error("Failed to pause download:", error);
+            }
+        }
+    }
+
+    // Resume a download
+    async function resumeDownload(track) {
+        const requestId = `${track.artist}-${track.title}`;
+        const statusData = downloadStatuses.get(requestId);
+
+        if (statusData && statusData.torrent_hash) {
+            try {
+                const response = await fetch(
+                    `/api/v1/download/resume/${statusData.torrent_hash}`,
+                    {
+                        method: "POST",
+                    },
+                );
+                const data = await response.json();
+
+                if (data.success) {
+                    console.log("Download resumed successfully");
+                    updateDownloadStatuses();
+                }
+            } catch (error) {
+                console.error("Failed to resume download:", error);
+            }
+        }
+    }
+
+    // Cancel a download
+    async function cancelDownload(track) {
+        const requestId = `${track.artist}-${track.title}`;
+        const statusData = downloadStatuses.get(requestId);
+
+        if (statusData && statusData.torrent_hash) {
+            try {
+                const response = await fetch(
+                    `/api/v1/download/cancel/${statusData.torrent_hash}`,
+                    {
+                        method: "POST",
+                    },
+                );
+                const data = await response.json();
+
+                if (data.success) {
+                    downloadRequests.set(requestId, "cancelled");
+                    downloadStatuses.delete(requestId);
+                    downloadRequests = downloadRequests;
+                    downloadStatuses = downloadStatuses;
+                    console.log("Download cancelled successfully");
+                }
+            } catch (error) {
+                console.error("Failed to cancel download:", error);
+            }
+        }
+    }
+
+    // Get detailed download info for display
+    function getDownloadInfo(track) {
+        const requestId = `${track.artist}-${track.title}`;
+        return downloadStatuses.get(requestId) || null;
+    }
+
+    // Get enhanced download button state with detailed status
+    function getEnhancedDownloadState(track) {
+        const requestId = `${track.artist}-${track.title}`;
+        const basicStatus = downloadRequests.get(requestId);
+        const detailedStatus = downloadStatuses.get(requestId);
+
+        if (basicStatus === "requesting") {
+            return {
+                text: "⏳ Requesting...",
+                disabled: true,
+                class: "requesting",
+            };
+        }
+
+        if (detailedStatus) {
+            switch (detailedStatus.status) {
+                case "queued":
+                    return {
+                        text: "📦 Queued",
+                        disabled: true,
+                        class: "queued",
+                    };
+                case "downloading":
+                    const progress = Math.round(
+                        (detailedStatus.progress || 0) * 100,
+                    );
+                    return {
+                        text: `⬇️ ${progress}%`,
+                        disabled: true,
+                        class: "downloading",
+                    };
+                case "completed":
+                    return {
+                        text: "✅ Completed",
+                        disabled: true,
+                        class: "completed",
+                    };
+                case "failed":
+                case "error":
+                    return {
+                        text: "🔄 Retry",
+                        disabled: false,
+                        class: "failed",
+                    };
+                case "paused":
+                    return {
+                        text: "⏸️ Paused",
+                        disabled: true,
+                        class: "paused",
+                    };
+                default:
+                    return {
+                        text: "👁️ Monitoring",
+                        disabled: true,
+                        class: "monitoring",
+                    };
+            }
+        }
+
+        if (basicStatus === "monitoring") {
+            return {
+                text: "👁️ Monitoring",
+                disabled: true,
+                class: "monitoring",
+            };
+        }
+
+        if (basicStatus === "failed") {
+            return {
+                text: "🔄 Retry",
+                disabled: false,
+                class: "failed",
+            };
+        }
+
+        if (basicStatus === "completed") {
+            return {
+                text: "✅ Complete",
+                disabled: true,
+                class: "completed",
+            };
+        }
+
+        // Default state
+        return {
+            text: `⬇️ Get ${track.quality || "Music"}`,
+            disabled: false,
+            class: "default",
+        };
     }
 
     // Clear search
@@ -632,37 +876,54 @@
                                     </a>
                                 {/if}
                             {:else if track.source === "lidarr" && track.downloadable}
-                                {#if getDownloadStatus(track) === "requesting"}
+                                {@const downloadState =
+                                    getEnhancedDownloadState(track)}
+                                {@const downloadInfo = getDownloadInfo(track)}
+
+                                <div class="download-section">
                                     <button
-                                        class="action-btn requesting"
-                                        disabled
-                                    >
-                                        ⏳ Requesting...
-                                    </button>
-                                {:else if getDownloadStatus(track) === "monitoring"}
-                                    <button
-                                        class="action-btn monitoring"
-                                        disabled
-                                    >
-                                        👁️ Monitoring
-                                    </button>
-                                {:else if getDownloadStatus(track) === "failed"}
-                                    <button
-                                        class="action-btn download-btn"
+                                        class="action-btn download-btn {downloadState.class}"
                                         on:click={() => requestDownload(track)}
-                                        title="Retry Download"
-                                    >
-                                        🔄 Retry Download
-                                    </button>
-                                {:else}
-                                    <button
-                                        class="action-btn download-btn lidarr-download"
-                                        on:click={() => requestDownload(track)}
+                                        disabled={downloadState.disabled}
                                         title="Download {track.quality} - {track.size_mb}MB"
                                     >
-                                        ⬇️ Get {track.quality}
+                                        {downloadState.text}
                                     </button>
-                                {/if}
+
+                                    {#if downloadInfo && (downloadInfo.status === "downloading" || downloadInfo.status === "queued")}
+                                        <div class="download-controls">
+                                            {#if downloadInfo.status === "downloading"}
+                                                <button
+                                                    class="action-btn small-btn pause-btn"
+                                                    on:click={() =>
+                                                        pauseDownload(track)}
+                                                    title="Pause Download"
+                                                >
+                                                    ⏸️
+                                                </button>
+                                            {/if}
+                                            <button
+                                                class="action-btn small-btn cancel-btn"
+                                                on:click={() =>
+                                                    cancelDownload(track)}
+                                                title="Cancel Download"
+                                            >
+                                                ❌
+                                            </button>
+                                        </div>
+
+                                        {#if downloadInfo.download_speed}
+                                            <div class="download-info">
+                                                <small
+                                                    >Speed: {Math.round(
+                                                        downloadInfo.download_speed /
+                                                            1024,
+                                                    )} KB/s</small
+                                                >
+                                            </div>
+                                        {/if}
+                                    {/if}
+                                </div>
 
                                 {#if track.magnet_url}
                                     <a
@@ -1415,5 +1676,105 @@
     .action-btn.download-btn.default:hover {
         background: rgba(0, 191, 255, 0.2);
         transform: translateY(-1px);
+    }
+
+    /* Enhanced download states */
+    .action-btn.queued {
+        background: rgba(138, 43, 226, 0.1);
+        border-color: #8a2be2;
+        color: #8a2be2;
+        cursor: wait;
+    }
+
+    .action-btn.downloading {
+        background: rgba(255, 165, 0, 0.1);
+        border-color: #ffa500;
+        color: #ffa500;
+        cursor: wait;
+        animation: pulse 2s infinite;
+    }
+
+    .action-btn.completed {
+        background: rgba(50, 205, 50, 0.1);
+        border-color: #32cd32;
+        color: #32cd32;
+    }
+
+    .action-btn.paused {
+        background: rgba(255, 215, 0, 0.1);
+        border-color: #ffd700;
+        color: #ffd700;
+    }
+
+    .action-btn.monitoring {
+        background: rgba(100, 149, 237, 0.1);
+        border-color: #6495ed;
+        color: #6495ed;
+        cursor: wait;
+    }
+
+    /* Download section container */
+    .download-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: flex-start;
+    }
+
+    /* Download controls */
+    .download-controls {
+        display: flex;
+        gap: 4px;
+        margin-top: 4px;
+    }
+
+    .small-btn {
+        padding: 4px 8px;
+        font-size: 12px;
+        min-width: auto;
+        height: 24px;
+    }
+
+    .pause-btn {
+        background: rgba(255, 215, 0, 0.1);
+        border-color: #ffd700;
+        color: #ffd700;
+    }
+
+    .pause-btn:hover {
+        background: rgba(255, 215, 0, 0.2);
+    }
+
+    .cancel-btn {
+        background: rgba(220, 20, 60, 0.1);
+        border-color: #dc143c;
+        color: #dc143c;
+    }
+
+    .cancel-btn:hover {
+        background: rgba(220, 20, 60, 0.2);
+    }
+
+    /* Download info */
+    .download-info {
+        margin-top: 4px;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.7);
+        background: rgba(0, 0, 0, 0.2);
+        padding: 2px 6px;
+        border-radius: 4px;
+    }
+
+    /* Pulse animation for downloading state */
+    @keyframes pulse {
+        0% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.7;
+        }
+        100% {
+            opacity: 1;
+        }
     }
 </style>

@@ -45,8 +45,8 @@ declare module '$env/static/private' {
 	export const _: string;
 	export const MOTD_SHOWN: string;
 	export const HOME: string;
-	export const LANG: string;
 	export const LC_PAPER: string;
+	export const LANG: string;
 	export const npm_package_version: string;
 	export const VIRTUAL_ENV_DISABLE_PROMPT: string;
 	export const MANROFFOPT: string;
@@ -134,8 +134,8 @@ declare module '$env/dynamic/private' {
 		_: string;
 		MOTD_SHOWN: string;
 		HOME: string;
-		LANG: string;
 		LC_PAPER: string;
+		LANG: string;
 		npm_package_version: string;
 		VIRTUAL_ENV_DISABLE_PROMPT: string;
 		MANROFFOPT: string;

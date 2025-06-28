@@ -175,7 +175,8 @@ impl StorageManager {
         // Check for common partial download patterns
         let mut entries = fs::read_dir(parent).await?;
         while let Some(entry) = entries.next_entry().await? {
-            let name = entry.file_name().to_string_lossy();
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy();
             if name.starts_with(&*filename) && (name.ends_with(".part") || name.ends_with(".tmp")) {
                 return Ok(true);
             }
@@ -331,7 +332,7 @@ impl StorageManager {
         while let Some(entry) = entries.next_entry().await? {
             let entry_path = entry.path();
             if entry_path.is_dir() {
-                Self::remove_empty_directories(&entry_path).await?;
+                Box::pin(Self::remove_empty_directories(&entry_path)).await?;
             }
         }
 

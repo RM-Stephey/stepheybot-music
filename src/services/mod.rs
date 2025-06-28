@@ -3,18 +3,22 @@
 //! This module contains all the business logic services that power the music
 //! recommendation and management system.
 
+pub mod download_service;
 pub mod library;
 pub mod playlist;
 pub mod recommendation;
 pub mod storage;
 pub mod sync;
+pub mod user_service;
 
 // Re-export for convenience
+pub use download_service::DownloadService;
 pub use library::LibraryService;
 pub use playlist::PlaylistService;
 pub use recommendation::RecommendationService;
 pub use storage::StorageManager;
 pub use sync::SyncService;
+pub use user_service::UserService;
 
 use anyhow::Result;
 use std::sync::Arc;
@@ -31,11 +35,13 @@ use crate::{
 /// Service manager that coordinates all services
 #[derive(Clone)]
 pub struct ServiceManager {
+    pub download: Arc<DownloadService>,
     pub library: Arc<LibraryService>,
     pub playlist: Arc<PlaylistService>,
     pub recommendation: Arc<RecommendationService>,
     pub storage: Arc<StorageManager>,
     pub sync: Arc<SyncService>,
+    pub user: Arc<UserService>,
 }
 
 impl ServiceManager {
@@ -50,6 +56,14 @@ impl ServiceManager {
         cache_dir: &str,
     ) -> Result<Self> {
         info!("Initializing service manager");
+
+        // Initialize download service
+        let download_config = crate::services::download_service::DownloadConfig {
+            download_path: std::path::PathBuf::from(download_path),
+            final_library_path: std::path::PathBuf::from(music_path),
+            ..Default::default()
+        };
+        let download = Arc::new(DownloadService::new(download_config));
 
         // Initialize core services
         let library = Arc::new(LibraryService::new(
@@ -80,14 +94,18 @@ impl ServiceManager {
             listenbrainz_client.clone(),
         )?);
 
+        let user = Arc::new(UserService::new(database.clone()));
+
         info!("All services initialized successfully");
 
         Ok(Self {
+            download,
             library,
             playlist,
             recommendation,
             storage,
             sync,
+            user,
         })
     }
 
@@ -96,23 +114,28 @@ impl ServiceManager {
         let mut status = ServiceHealthStatus::default();
 
         // Check each service
+        status.download = true; // Download service health check via qBittorrent
         status.library = self.library.health_check().await.is_ok();
         status.playlist = self.playlist.health_check().await.is_ok();
         status.recommendation = self.recommendation.health_check().await.is_ok();
         status.storage = true; // Storage manager doesn't have health check yet
         status.sync = self.sync.health_check().await.is_ok();
+        status.user = true; // User service is always healthy if database is available
 
-        status.overall = status.library
+        status.overall = status.download
+            && status.library
             && status.playlist
             && status.recommendation
             && status.storage
-            && status.sync;
+            && status.sync
+            && status.user;
 
         Ok(status)
     }
 
     /// Get service statistics
     pub async fn get_stats(&self) -> Result<ServiceStats> {
+        let download_stats = self.download.get_stats().await;
         let library_stats = self.library.get_stats().await.unwrap_or_default();
         let playlist_stats = self.playlist.get_stats().await.unwrap_or_default();
         let recommendation_stats = self.recommendation.get_stats().await.unwrap_or_default();
@@ -120,6 +143,7 @@ impl ServiceManager {
         let sync_stats = self.sync.get_stats().await.unwrap_or_default();
 
         Ok(ServiceStats {
+            download: Some(serde_json::to_value(download_stats).unwrap_or_default()),
             library: library_stats,
             playlist: playlist_stats,
             recommendation: recommendation_stats,
@@ -162,19 +186,22 @@ impl ServiceManager {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ServiceHealthStatus {
     pub overall: bool,
+    pub download: bool,
     pub library: bool,
     pub playlist: bool,
     pub recommendation: bool,
     pub storage: bool,
     pub sync: bool,
+    pub user: bool,
 }
 
 /// Statistics for all services
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ServiceStats {
+    pub download: Option<serde_json::Value>,
     pub library: LibraryStats,
     pub playlist: PlaylistStats,
-    pub recommendation: RecommendationStats,
+    pub recommendation: crate::services::recommendation::RecommendationStats,
     pub storage: Option<serde_json::Value>,
     pub sync: SyncStats,
 }
@@ -195,14 +222,6 @@ pub struct PlaylistStats {
     pub smart_playlists: u64,
     pub total_playlist_tracks: u64,
     pub most_popular_playlist: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct RecommendationStats {
-    pub total_recommendations: u64,
-    pub recommendations_consumed: u64,
-    pub average_score: f64,
-    pub last_generation: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]

@@ -5,6 +5,18 @@ edition = "2021"
 authors = ["Stephey <stephey@stepheybot.dev>"]
 description = "Private Spotify-like music streaming service with recommendations"
 
+[[bin]]
+name = "stepheybot-music"
+path = "src/main.rs"
+
+[[bin]]
+name = "test_multiuser_api"
+path = "src/bin/test_multiuser_api.rs"
+
+[lib]
+name = "stepheybot_music"
+path = "src/lib.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1.35", features = ["full"] }
@@ -35,7 +47,12 @@ sqlx = { version = "0.7.3", features = [
 ] }
 
 # HTTP client
-reqwest = { version = "0.11.24", features = ["json", "stream", "multipart"] }
+reqwest = { version = "0.11.24", features = [
+    "json",
+    "stream",
+    "multipart",
+    "cookies",
+] }
 
 # Date and time
 chrono = { version = "0.4.33", features = ["serde"] }
@@ -62,6 +79,15 @@ urlencoding = "2.1.3"
 md5 = "0.7.0"
 tempfile = "3.9.0"
 walkdir = "2.4.0"
+jsonwebtoken = "9.3.1"
+
+# Features
+[features]
+default = ["auth", "recommendations"]
+auth = []
+recommendations = []
+social = []
+integrations = []
 
 # Build optimization
 [profile.release]

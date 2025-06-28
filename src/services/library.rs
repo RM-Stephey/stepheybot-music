@@ -130,7 +130,7 @@ impl LibraryService {
 
             if path.is_dir() {
                 // Recursively scan subdirectories
-                if let Err(e) = self.scan_directory(&path, result).await {
+                if let Err(e) = Box::pin(self.scan_directory(&path, result)).await {
                     warn!("Failed to scan directory {}: {}", path.display(), e);
                     result.errors += 1;
                 }

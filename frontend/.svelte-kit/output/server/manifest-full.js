@@ -7,15 +7,17 @@ function __memo(fn) {
 return {
 	appDir: "_app",
 	appPath: "_app",
-	assets: new Set(["favicon.svg","test-music-player.js"]),
-	mimeTypes: {".svg":"image/svg+xml",".js":"text/javascript"},
+	assets: new Set(["favicon.svg"]),
+	mimeTypes: {".svg":"image/svg+xml"},
 	_: {
-		client: {start:"_app/immutable/entry/start.RCBeBFaD.js",app:"_app/immutable/entry/app.Bp1ozdMQ.js",imports:["_app/immutable/entry/start.RCBeBFaD.js","_app/immutable/chunks/BlGQVF5x.js","_app/immutable/chunks/Y-CuHk7n.js","_app/immutable/chunks/pifoKX6I.js","_app/immutable/entry/app.Bp1ozdMQ.js","_app/immutable/chunks/Y-CuHk7n.js","_app/immutable/chunks/DKhF1pO8.js"],stylesheets:[],fonts:[],uses_env_dynamic_public:false},
+		client: {start:"_app/immutable/entry/start.D5mWMX7L.js",app:"_app/immutable/entry/app.N3BVvhh_.js",imports:["_app/immutable/entry/start.D5mWMX7L.js","_app/immutable/chunks/D2xM_tDk.js","_app/immutable/chunks/DP8VM1Me.js","_app/immutable/chunks/DUPp9zZP.js","_app/immutable/entry/app.N3BVvhh_.js","_app/immutable/chunks/DP8VM1Me.js","_app/immutable/chunks/DOSGr0tm.js"],stylesheets:[],fonts:[],uses_env_dynamic_public:false},
 		nodes: [
 			__memo(() => import('./nodes/0.js')),
 			__memo(() => import('./nodes/1.js')),
 			__memo(() => import('./nodes/2.js')),
-			__memo(() => import('./nodes/3.js'))
+			__memo(() => import('./nodes/3.js')),
+			__memo(() => import('./nodes/4.js')),
+			__memo(() => import('./nodes/5.js'))
 		],
 		routes: [
 			{
@@ -30,6 +32,20 @@ return {
 				pattern: /^\/discover\/?$/,
 				params: [],
 				page: { layouts: [0,], errors: [1,], leaf: 3 },
+				endpoint: null
+			},
+			{
+				id: "/downloads",
+				pattern: /^\/downloads\/?$/,
+				params: [],
+				page: { layouts: [0,], errors: [1,], leaf: 4 },
+				endpoint: null
+			},
+			{
+				id: "/search",
+				pattern: /^\/search\/?$/,
+				params: [],
+				page: { layouts: [0,], errors: [1,], leaf: 5 },
 				endpoint: null
 			}
 		],

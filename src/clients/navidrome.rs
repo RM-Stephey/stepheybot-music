@@ -333,7 +333,7 @@ impl NavidromeClient {
 
     /// Perform health check on the Navidrome server
     pub async fn health_check(&self) -> Result<()> {
-        let response = self.make_request("ping", &[]).await?;
+        let response: SubsonicResponse<serde_json::Value> = self.make_request("ping", &[]).await?;
 
         if response.subsonic_response.status != "ok" {
             anyhow::bail!(
@@ -403,18 +403,20 @@ impl NavidromeClient {
         size: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<NavidromeAlbum>> {
+        let s_str;
+        let o_str;
         let mut params = Vec::new();
 
         if let Some(t) = album_type {
             params.push(("type", t));
         }
         if let Some(s) = size {
-            let s_str = s.to_string();
-            params.push(("size", &s_str));
+            s_str = s.to_string();
+            params.push(("size", s_str.as_str()));
         }
         if let Some(o) = offset {
-            let o_str = o.to_string();
-            params.push(("offset", &o_str));
+            o_str = o.to_string();
+            params.push(("offset", o_str.as_str()));
         }
 
         let response: SubsonicResponse<AlbumsResponse> =
@@ -439,22 +441,27 @@ impl NavidromeClient {
         from_year: Option<u32>,
         to_year: Option<u32>,
     ) -> Result<Vec<NavidromeSong>> {
+        let s_str;
+        let g_str;
+        let fy_str;
+        let ty_str;
         let mut params = Vec::new();
 
         if let Some(s) = size {
-            let s_str = s.to_string();
-            params.push(("size", &s_str));
+            s_str = s.to_string();
+            params.push(("size", s_str.as_str()));
         }
         if let Some(g) = genre {
-            params.push(("genre", g));
+            g_str = g.to_string();
+            params.push(("genre", g_str.as_str()));
         }
         if let Some(fy) = from_year {
-            let fy_str = fy.to_string();
-            params.push(("fromYear", &fy_str));
+            fy_str = fy.to_string();
+            params.push(("fromYear", fy_str.as_str()));
         }
         if let Some(ty) = to_year {
-            let ty_str = ty.to_string();
-            params.push(("toYear", &ty_str));
+            ty_str = ty.to_string();
+            params.push(("toYear", ty_str.as_str()));
         }
 
         let response: SubsonicResponse<SongsResponse> =
@@ -474,19 +481,22 @@ impl NavidromeClient {
         album_count: Option<u32>,
         song_count: Option<u32>,
     ) -> Result<SearchResult> {
+        let ac_str;
+        let alc_str;
+        let sc_str;
         let mut params = vec![("query", query)];
 
         if let Some(ac) = artist_count {
-            let ac_str = ac.to_string();
-            params.push(("artistCount", &ac_str));
+            ac_str = ac.to_string();
+            params.push(("artistCount", ac_str.as_str()));
         }
         if let Some(alc) = album_count {
-            let alc_str = alc.to_string();
-            params.push(("albumCount", &alc_str));
+            alc_str = alc.to_string();
+            params.push(("albumCount", alc_str.as_str()));
         }
         if let Some(sc) = song_count {
-            let sc_str = sc.to_string();
-            params.push(("songCount", &sc_str));
+            sc_str = sc.to_string();
+            params.push(("songCount", sc_str.as_str()));
         }
 
         let response: SubsonicResponse<SongsResponse> =
@@ -639,10 +649,12 @@ impl NavidromeClient {
         time: Option<u64>,
         submission: Option<bool>,
     ) -> Result<()> {
+        let t_str;
         let mut params = vec![("id", song_id)];
 
         if let Some(t) = time {
-            params.push(("time", &t.to_string()));
+            t_str = t.to_string();
+            params.push(("time", t_str.as_str()));
         }
         if let Some(s) = submission {
             params.push(("submission", if s { "true" } else { "false" }));

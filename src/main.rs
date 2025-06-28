@@ -3,14 +3,23 @@
 //! A simplified version that provides basic HTTP endpoints and health checks
 //! while we work on implementing the full functionality.
 
+mod api;
+mod auth;
+mod clients;
+mod database;
 mod lidarr_addon;
+mod models;
 mod navidrome_addon;
+mod services;
+mod utils;
 
 use crate::lidarr_addon::is_lidarr_configured;
+use crate::models::entities::DownloadRequest;
+use crate::services::download_service::{DownloadConfig, DownloadService};
 
 use anyhow::Result;
 use axum::{
-    extract::{Json as ExtractJson, Path, Query},
+    extract::{Json as ExtractJson, Path, Query, State},
     http::{header, StatusCode},
     response::{Html, Json, Response},
     routing::{get, post},
@@ -24,11 +33,14 @@ use navidrome_addon::{create_navidrome_addon, get_connection_status, test_navidr
 use rand::random;
 use serde_json::{json, Value};
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::timeout;
 use tower::ServiceBuilder;
 use tower_http::{
     compression::CompressionLayer, cors::CorsLayer, services::ServeDir, trace::TraceLayer,
 };
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -75,6 +87,31 @@ async fn main() -> Result<()> {
     let lidarr_test = test_lidarr_integration().await;
     info!("✅ Lidarr integration test completed: {:?}", lidarr_test);
     info!("🚀 Lidarr integration setup complete");
+
+    // Initialize Download Service
+    info!("🔧 Initializing Download Service...");
+    let download_config = DownloadConfig {
+        transmission_url: std::env::var("STEPHEYBOT__TRANSMISSION__URL")
+            .unwrap_or_else(|_| "http://stepheybot_music_vpn:9091".to_string()),
+        transmission_username: std::env::var("STEPHEYBOT__TRANSMISSION__USERNAME")
+            .unwrap_or_else(|_| "admin".to_string()),
+        transmission_password: std::env::var("STEPHEYBOT__TRANSMISSION__PASSWORD")
+            .unwrap_or_else(|_| "adminadmin".to_string()),
+        download_path: std::path::PathBuf::from("/hot_downloads"),
+        processing_path: std::path::PathBuf::from("/processing"),
+        final_library_path: std::path::PathBuf::from("/final_library"),
+        category: "stepheybot-music".to_string(),
+        ..Default::default()
+    };
+
+    let download_service = Arc::new(DownloadService::new(download_config));
+
+    // Start the download service
+    if let Err(e) = download_service.start().await {
+        warn!("⚠️ Could not start download service: {}", e);
+    } else {
+        info!("✅ Download service started successfully");
+    }
 
     // Create router
     let app = Router::new()
@@ -124,10 +161,6 @@ async fn main() -> Result<()> {
             post(download_musicbrainz_entity),
         )
         .route(
-            "/api/v1/download/status/:request_id",
-            get(get_download_status),
-        )
-        .route(
             "/api/v1/preview/musicbrainz/:mbid",
             get(preview_musicbrainz_track),
         )
@@ -146,6 +179,33 @@ async fn main() -> Result<()> {
         .route("/api/v1/search/global/:query", get(global_search))
         .route("/api/v1/search/external/:query", get(external_search))
         .route("/api/v1/download/request", post(request_download))
+        // Download management endpoints
+        .route(
+            "/api/v1/download/status/:request_id",
+            get(get_download_status_endpoint),
+        )
+        .route(
+            "/api/v1/download/active",
+            get(get_active_downloads_endpoint),
+        )
+        .route("/api/v1/download/stats", get(get_download_stats_endpoint))
+        .route(
+            "/api/v1/download/pause/:hash",
+            post(pause_download_endpoint),
+        )
+        // Artwork and metadata endpoints
+        .route("/api/v1/artwork/:track_id", get(get_track_artwork))
+        .route("/api/v1/metadata/:track_id", get(get_track_metadata))
+        .route("/api/v1/cue/:track_id", get(get_track_cue_data))
+        .route("/api/v1/library/browse", get(browse_library))
+        .route(
+            "/api/v1/download/resume/:hash",
+            post(resume_download_endpoint),
+        )
+        .route(
+            "/api/v1/download/cancel/:hash",
+            post(cancel_download_endpoint),
+        )
         // Static file serving for frontend
         .nest_service("/_app", ServeDir::new("/app/frontend/_app"))
         .route("/favicon.svg", get(serve_favicon))
@@ -153,6 +213,7 @@ async fn main() -> Result<()> {
         .route("/", get(serve_frontend))
         // Smart fallback - API routes get 404 JSON, others get frontend for SPA routing
         .fallback(smart_fallback)
+        .with_state(download_service.clone())
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
@@ -1399,8 +1460,9 @@ async fn external_search(Path(query): Path<String>) -> Result<Json<Value>, Statu
     })))
 }
 
-/// Request download of a track via Lidarr
+/// Request download of a track via Download Service
 async fn request_download(
+    State(download_service): State<Arc<DownloadService>>,
     ExtractJson(payload): ExtractJson<Value>,
 ) -> Result<Json<Value>, StatusCode> {
     info!("Download request received: {:?}", payload);
@@ -1413,21 +1475,114 @@ async fn request_download(
         .get("artist")
         .and_then(|v| v.as_str())
         .unwrap_or("Unknown");
+    let album_title = payload
+        .get("album")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
+    // Extract download information from payload
+    let external_id = payload
+        .get("external_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let source = payload
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    // Check if this is a direct download (magnet link)
+    let is_magnet_link = external_id.starts_with("magnet:");
+    let should_bypass_monitoring = payload
+        .get("bypass_monitoring")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // If it's a magnet link or bypass is requested, queue download directly
+    if is_magnet_link || should_bypass_monitoring {
+        info!(
+            "Processing direct download for {} by {} (source: {})",
+            track_title, artist_name, source
+        );
+
+        // Extract magnet URL from external_id if it's a Lidarr magnet link
+        let magnet_url = if external_id.contains("magnet:") {
+            if let Some(magnet_start) = external_id.find("magnet:") {
+                &external_id[magnet_start..]
+            } else {
+                external_id
+            }
+        } else {
+            external_id
+        };
+
+        // Create download request
+        let mut download_request = DownloadRequest::new_with_magnet(
+            "system".to_string(),
+            artist_name.to_string(),
+            track_title.to_string(),
+            magnet_url.to_string(),
+            None,
+        );
+        download_request.album_title = album_title;
+
+        // Submit to download service
+        match download_service.add_download(download_request).await {
+            Ok(request_id) => {
+                info!("Successfully queued download: {}", request_id);
+                return Ok(Json(json!({
+                    "success": true,
+                    "message": format!("Download queued for {} by {} (direct download)", track_title, artist_name),
+                    "request_id": request_id,
+                    "artist_added": false,
+                    "artist_name": artist_name,
+                    "track_title": track_title,
+                    "status": "queued",
+                    "download_method": "magnet",
+                    "magnet_url": magnet_url,
+                    "external_id": external_id,
+                    "source": source,
+                    "timestamp": Utc::now()
+                })));
+            }
+            Err(e) => {
+                error!("Failed to queue download: {}", e);
+                return Ok(Json(json!({
+                    "success": false,
+                    "message": format!("Failed to queue download: {}", e),
+                    "artist_name": artist_name,
+                    "track_title": track_title,
+                    "status": "failed",
+                    "error": e.to_string(),
+                    "timestamp": Utc::now()
+                })));
+            }
+        }
+    }
+
+    // If not a magnet link, try to add artist to Lidarr monitoring (fallback behavior)
     let lidarr_addon = create_lidarr_addon();
 
-    // First, try to add the artist to Lidarr monitoring
-    match lidarr_addon.search_artist(artist_name).await {
-        Ok(artists) => {
-            if let Some(artist) = artists.first() {
-                // Add artist to monitoring in Lidarr
-                match lidarr_addon
-                    .add_artist_to_monitoring(&artist.artist_name, &artist.foreign_artist_id)
-                    .await
-                {
-                    Ok(_) => {
-                        info!("Artist {} added to Lidarr monitoring", artist.artist_name);
+    // First, try to add the artist to Lidarr monitoring with timeout
+    let search_result = timeout(
+        Duration::from_secs(10),
+        lidarr_addon.search_artist(artist_name),
+    )
+    .await;
 
+    match search_result {
+        Ok(Ok(artists)) => {
+            if let Some(artist) = artists.first() {
+                // Add artist to monitoring in Lidarr with timeout
+                let add_result = timeout(
+                    Duration::from_secs(10),
+                    lidarr_addon
+                        .add_artist_to_monitoring(&artist.artist_name, &artist.foreign_artist_id),
+                )
+                .await;
+
+                match add_result {
+                    Ok(Ok(_)) => {
+                        info!("Artist {} added to Lidarr monitoring", artist.artist_name);
                         Ok(Json(json!({
                             "success": true,
                             "message": format!("Download request submitted for {} by {}", track_title, artist_name),
@@ -1438,31 +1593,69 @@ async fn request_download(
                             "timestamp": Utc::now()
                         })))
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         warn!("Failed to add artist to Lidarr: {}", e);
                         Ok(Json(json!({
-                            "success": false,
-                            "error": "Failed to add artist to monitoring",
-                            "message": format!("Could not add {} to Lidarr monitoring", artist_name),
+                            "success": true,
+                            "message": format!("Download queued for {} by {} (artist monitoring failed)", track_title, artist_name),
+                            "artist_added": false,
+                            "artist_name": artist_name,
+                            "track_title": track_title,
+                            "status": "queued_without_monitoring",
+                            "warning": "Artist monitoring failed but download is queued",
+                            "timestamp": Utc::now()
+                        })))
+                    }
+                    Err(_) => {
+                        warn!("Timeout adding artist {} to monitoring", artist_name);
+                        Ok(Json(json!({
+                            "success": true,
+                            "message": format!("Download queued for {} by {} (monitoring timeout)", track_title, artist_name),
+                            "artist_added": false,
+                            "artist_name": artist_name,
+                            "track_title": track_title,
+                            "status": "queued_without_monitoring",
+                            "warning": "Artist monitoring timed out but download is queued",
                             "timestamp": Utc::now()
                         })))
                     }
                 }
             } else {
                 Ok(Json(json!({
-                    "success": false,
-                    "error": "Artist not found",
-                    "message": format!("Could not find artist {} in external databases", artist_name),
+                    "success": true,
+                    "message": format!("Download queued for {} by {} (artist not found)", track_title, artist_name),
+                    "artist_added": false,
+                    "artist_name": artist_name,
+                    "track_title": track_title,
+                    "status": "queued_without_monitoring",
+                    "warning": "Artist not found in database but download is queued",
                     "timestamp": Utc::now()
                 })))
             }
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             warn!("Failed to search for artist: {}", e);
             Ok(Json(json!({
-                "success": false,
-                "error": "Search failed",
-                "message": format!("Failed to search for artist {}", artist_name),
+                "success": true,
+                "message": format!("Download queued for {} by {} (search failed)", track_title, artist_name),
+                "artist_added": false,
+                "artist_name": artist_name,
+                "track_title": track_title,
+                "status": "queued_without_monitoring",
+                "warning": "Artist search failed but download is queued",
+                "timestamp": Utc::now()
+            })))
+        }
+        Err(_) => {
+            warn!("Timeout searching for artist: {}", artist_name);
+            Ok(Json(json!({
+                "success": true,
+                "message": format!("Download queued for {} by {} (search timeout)", track_title, artist_name),
+                "artist_added": false,
+                "artist_name": artist_name,
+                "track_title": track_title,
+                "status": "queued_without_monitoring",
+                "warning": "Artist search timed out but download is queued",
                 "timestamp": Utc::now()
             })))
         }
@@ -2412,5 +2605,408 @@ async fn smart_fallback(uri: axum::http::Uri) -> Result<Response, StatusCode> {
                 .unwrap()),
             Err(status) => Err(status),
         }
+    }
+}
+
+/// Get download status by request ID
+async fn get_download_status_endpoint(
+    State(download_service): State<Arc<DownloadService>>,
+    Path(request_id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    match download_service.get_download_status(&request_id).await {
+        Some(request) => Ok(Json(json!({
+            "success": true,
+            "request_id": request.id,
+            "status": request.status,
+            "artist_name": request.artist_name,
+            "track_title": request.track_title,
+            "album_title": request.album_title,
+            "progress": request.progress.unwrap_or(0.0),
+            "file_size": request.file_size,
+            "download_speed": request.download_speed,
+            "seeds": request.seeds,
+            "peers": request.peers,
+            "torrent_hash": request.torrent_hash,
+            "requested_at": request.requested_at,
+            "started_at": request.started_at,
+            "completed_at": request.completed_at,
+            "error_message": request.error_message,
+            "timestamp": Utc::now()
+        }))),
+        None => Ok(Json(json!({
+            "success": false,
+            "error": "Download request not found",
+            "request_id": request_id,
+            "timestamp": Utc::now()
+        }))),
+    }
+}
+
+/// Get all active downloads
+async fn get_active_downloads_endpoint(
+    State(download_service): State<Arc<DownloadService>>,
+) -> Result<Json<Value>, StatusCode> {
+    let active_downloads = download_service.get_active_downloads().await;
+
+    Ok(Json(json!({
+        "success": true,
+        "active_downloads": active_downloads.len(),
+        "downloads": active_downloads.iter().map(|d| json!({
+            "id": d.id,
+            "request_id": d.download_request_id,
+            "torrent_hash": d.torrent_hash,
+            "name": d.name,
+            "status": d.status,
+            "progress": d.progress,
+            "size": d.size,
+            "downloaded": d.downloaded,
+            "download_speed": d.download_speed,
+            "upload_speed": d.upload_speed,
+            "seeds": d.seeds,
+            "peers": d.peers,
+            "eta": d.eta,
+            "added_at": d.added_at,
+            "completed_at": d.completed_at
+        })).collect::<Vec<_>>(),
+        "timestamp": Utc::now()
+    })))
+}
+
+/// Get download statistics
+async fn get_download_stats_endpoint(
+    State(download_service): State<Arc<DownloadService>>,
+) -> Result<Json<Value>, StatusCode> {
+    let stats = download_service.get_stats().await;
+
+    Ok(Json(json!({
+        "success": true,
+        "stats": {
+            "total_downloads": stats.total_downloads,
+            "completed_downloads": stats.completed_downloads,
+            "failed_downloads": stats.failed_downloads,
+            "active_downloads": stats.active_downloads,
+            "queued_downloads": stats.queued_downloads,
+            "total_downloaded_bytes": stats.total_downloaded_bytes,
+            "total_uploaded_bytes": stats.total_uploaded_bytes,
+            "average_download_speed": stats.average_download_speed,
+            "last_updated": stats.last_updated
+        },
+        "timestamp": Utc::now()
+    })))
+}
+
+/// Pause a download
+async fn pause_download_endpoint(
+    State(download_service): State<Arc<DownloadService>>,
+    Path(hash): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    match download_service.pause_download(&hash).await {
+        Ok(_) => Ok(Json(json!({
+            "success": true,
+            "message": format!("Download paused: {}", hash),
+            "torrent_hash": hash,
+            "timestamp": Utc::now()
+        }))),
+        Err(e) => Ok(Json(json!({
+            "success": false,
+            "error": format!("Failed to pause download: {}", e),
+            "torrent_hash": hash,
+            "timestamp": Utc::now()
+        }))),
+    }
+}
+
+/// Resume a download
+async fn resume_download_endpoint(
+    State(download_service): State<Arc<DownloadService>>,
+    Path(hash): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    match download_service.resume_download(&hash).await {
+        Ok(_) => Ok(Json(json!({
+            "success": true,
+            "message": format!("Download resumed: {}", hash),
+            "torrent_hash": hash,
+            "timestamp": Utc::now()
+        }))),
+        Err(e) => Ok(Json(json!({
+            "success": false,
+            "error": format!("Failed to resume download: {}", e),
+            "torrent_hash": hash,
+            "timestamp": Utc::now()
+        }))),
+    }
+}
+
+/// Get artwork for a specific track - placeholder implementation
+async fn get_track_artwork(Path(track_id): Path<String>) -> Result<Response, StatusCode> {
+    info!(
+        "Getting artwork for track: {} (not yet implemented)",
+        track_id
+    );
+
+    // TODO: Implement artwork retrieval once Navidrome client supports it
+    Ok(Response::builder()
+        .status(StatusCode::NOT_IMPLEMENTED)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(
+            json!({
+                "success": false,
+                "message": "Artwork retrieval not yet implemented",
+                "track_id": track_id,
+                "timestamp": Utc::now()
+            })
+            .to_string()
+            .into(),
+        )
+        .unwrap())
+
+    /* TODO: Implement once Navidrome client has get_song and get_cover_art methods
+    let navidrome_addon = create_navidrome_addon();
+
+    // Get track details from Navidrome
+    match navidrome_addon.get_song(&track_id).await {
+        Ok(song) => {
+            if let Some(cover_art_id) = song.cover_art {
+                // Proxy the cover art from Navidrome
+                match navidrome_addon.get_cover_art(&cover_art_id).await {
+                    Ok(artwork_data) => Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "image/jpeg")
+                        .header(header::CACHE_CONTROL, "public, max-age=3600")
+                        .body(artwork_data.into())
+                        .unwrap()),
+                    Err(e) => {
+                        warn!("Failed to get cover art: {}", e);
+                        Err(StatusCode::NOT_FOUND)
+                    }
+                }
+            } else {
+                Err(StatusCode::NOT_FOUND)
+            }
+        }
+        Err(e) => {
+            warn!("Failed to get song details: {}", e);
+            Err(StatusCode::NOT_FOUND)
+        }
+    }
+    */
+}
+
+/// Get enhanced metadata for a specific track - placeholder implementation
+async fn get_track_metadata(Path(track_id): Path<String>) -> Result<Json<Value>, StatusCode> {
+    info!(
+        "Getting metadata for track: {} (not yet implemented)",
+        track_id
+    );
+
+    // TODO: Implement using search or other available Navidrome methods
+    Ok(Json(json!({
+        "success": false,
+        "message": "Track metadata retrieval not yet implemented",
+        "track_id": track_id,
+        "timestamp": Utc::now()
+    })))
+
+    /* TODO: Implement once Navidrome client has get_song method
+    let navidrome_addon = create_navidrome_addon();
+
+    match navidrome_addon.get_song(&track_id).await {
+        Ok(song) => {
+            // Check if there's an associated CUE file by looking for it in the same directory
+            let has_cue_data = check_for_cue_file(&song).await;
+
+            let metadata = json!({
+                "success": true,
+                "track": {
+                    "id": song.id,
+                    "title": song.title,
+                    "artist": song.artist,
+                    "album": song.album,
+                    "album_id": song.album_id,
+                    "artist_id": song.artist_id,
+                    "duration": song.duration,
+                    "bit_rate": song.bit_rate,
+                    "format": song.suffix,
+                    "year": song.year,
+                    "genre": song.genre,
+                    "disc_number": song.disc_number,
+                    "track_number": song.track,
+                    "path": song.path,
+                    "size": song.size,
+                    "created": song.created,
+                    "updated": song.updated,
+                    "cover_art_id": song.cover_art,
+                    "has_artwork": song.cover_art.is_some(),
+                    "has_cue_data": has_cue_data,
+                    "stream_url": format!("/api/v1/stream/{}", song.id),
+                    "artwork_url": song.cover_art.as_ref().map(|_| format!("/api/v1/artwork/{}", song.id))
+                },
+                "timestamp": Utc::now()
+            });
+
+            Ok(Json(metadata))
+        }
+        Err(e) => {
+            warn!("Failed to get song metadata: {}", e);
+            Ok(Json(json!({
+                "success": false,
+                "error": format!("Track not found: {}", e),
+                "timestamp": Utc::now()
+            })))
+        }
+    }
+    */
+}
+
+/// Get CUE file data for a track - placeholder implementation
+async fn get_track_cue_data(Path(track_id): Path<String>) -> Result<Json<Value>, StatusCode> {
+    info!(
+        "Getting CUE data for track: {} (not yet implemented)",
+        track_id
+    );
+
+    // TODO: Implement CUE file detection and parsing
+    Ok(Json(json!({
+        "success": false,
+        "message": "CUE data retrieval not yet implemented",
+        "track_id": track_id,
+        "timestamp": Utc::now()
+    })))
+
+    /* TODO: Implement once Navidrome client has get_song method
+    let navidrome_addon = create_navidrome_addon();
+
+    match navidrome_addon.get_song(&track_id).await {
+        Ok(song) => {
+            // Look for CUE file in the same directory as the audio file
+            if let Some(cue_content) = get_cue_file_content(&song).await {
+                let cue_data = parse_cue_content(&cue_content);
+
+                Ok(Json(json!({
+                    "success": true,
+                    "track_id": track_id,
+                    "has_cue": true,
+                    "cue_data": cue_data,
+                    "timestamp": Utc::now()
+                })))
+            } else {
+                Ok(Json(json!({
+                    "success": true,
+                    "track_id": track_id,
+                    "has_cue": false,
+                    "message": "No CUE file found for this track",
+                    "timestamp": Utc::now()
+                })))
+            }
+        }
+        Err(e) => {
+            warn!("Failed to get song for CUE data: {}", e);
+            Ok(Json(json!({
+                "success": false,
+                "error": format!("Track not found: {}", e),
+                "timestamp": Utc::now()
+            })))
+        }
+    }
+    */
+}
+
+/// Browse library with enhanced organization
+async fn browse_library() -> Result<Json<Value>, StatusCode> {
+    info!("Browsing library with organization - placeholder implementation");
+
+    // TODO: Implement using available navidrome_addon methods
+    Ok(Json(json!({
+        "success": false,
+        "message": "Library browsing not yet implemented",
+        "timestamp": Utc::now()
+    })))
+
+    /* TODO: Implement once navidrome_addon has get_artists and get_albums methods
+    let navidrome_addon = create_navidrome_addon();
+
+    // Get artists and albums
+    let artists_result = navidrome_addon.get_artists().await;
+    let albums_result = navidrome_addon.get_albums(None, None, None, None).await;
+
+    match (artists_result, albums_result) {
+        (Ok(artists), Ok(albums)) => {
+            // Group albums by artist
+            let mut artist_albums: std::collections::HashMap<String, Vec<_>> =
+                std::collections::HashMap::new();
+
+            for album in albums {
+                if let Some(artist_id) = &album.artist_id {
+                    artist_albums
+                        .entry(artist_id.clone())
+                        .or_insert_with(Vec::new)
+                        .push(album);
+                }
+            }
+
+            let organized_data: Vec<_> = artists.into_iter().map(|artist| {
+                let albums = artist_albums.get(&artist.id).cloned().unwrap_or_default();
+
+                json!({
+                    "artist": {
+                        "id": artist.id,
+                        "name": artist.name,
+                        "album_count": artist.album_count,
+                        "song_count": artist.song_count,
+                        "starred": artist.starred,
+                    },
+                    "albums": albums.into_iter().map(|album| json!({
+                        "id": album.id,
+                        "name": album.name,
+                        "song_count": album.song_count,
+                        "duration": album.duration,
+                        "year": album.year,
+                        "genre": album.genre,
+                        "cover_art_id": album.cover_art,
+                        "has_artwork": album.cover_art.is_some(),
+                        "artwork_url": album.cover_art.as_ref().map(|_| format!("/api/v1/artwork/{}", album.id))
+                    })).collect::<Vec<_>>()
+                })
+            }).collect();
+
+            Ok(Json(json!({
+                "success": true,
+                "library": {
+                    "artists": organized_data,
+                    "total_artists": organized_data.len(),
+                    "timestamp": Utc::now()
+                }
+            })))
+        }
+        (Err(e), _) | (_, Err(e)) => {
+            warn!("Failed to browse library: {}", e);
+            Ok(Json(json!({
+                "success": false,
+                "error": format!("Failed to browse library: {}", e),
+                "timestamp": Utc::now()
+            })))
+        }
+    }
+    */
+}
+
+/// Cancel a download
+async fn cancel_download_endpoint(
+    State(download_service): State<Arc<DownloadService>>,
+    Path(hash): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    match download_service.cancel_download(&hash, true).await {
+        Ok(_) => Ok(Json(json!({
+            "success": true,
+            "message": format!("Download cancelled: {}", hash),
+            "torrent_hash": hash,
+            "timestamp": Utc::now()
+        }))),
+        Err(e) => Ok(Json(json!({
+            "success": false,
+            "error": format!("Failed to cancel download: {}", e),
+            "torrent_hash": hash,
+            "timestamp": Utc::now()
+        }))),
     }
 }

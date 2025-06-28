@@ -83,7 +83,7 @@
       "_musicPlayer.js"
     ],
     "css": [
-      "_app/immutable/assets/_layout.DS_y0YAx.css"
+      "_app/immutable/assets/_layout.CqHGqUoG.css"
     ]
   },
   "src/routes/+page.svelte": {
@@ -96,7 +96,7 @@
       "_musicPlayer.js"
     ],
     "css": [
-      "_app/immutable/assets/_page.CP2nKVyR.css"
+      "_app/immutable/assets/_page.BjCf70mr.css"
     ]
   },
   "src/routes/discover/+page.svelte": {
@@ -110,6 +110,31 @@
     ],
     "css": [
       "_app/immutable/assets/_page.CwZGHqQJ.css"
+    ]
+  },
+  "src/routes/downloads/+page.svelte": {
+    "file": "entries/pages/downloads/_page.svelte.js",
+    "name": "entries/pages/downloads/_page.svelte",
+    "src": "src/routes/downloads/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_ssr.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.DZZq2DOW.css"
+    ]
+  },
+  "src/routes/search/+page.svelte": {
+    "file": "entries/pages/search/_page.svelte.js",
+    "name": "entries/pages/search/_page.svelte",
+    "src": "src/routes/search/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_ssr.js",
+      "_musicPlayer.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.BOPYEVBO.css"
     ]
   }
 }

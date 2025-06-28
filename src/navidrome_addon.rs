@@ -136,25 +136,90 @@ impl NavidromeAddon {
             self.username, token, salt
         );
 
-        // Try to get artists count
+        // Get real artist count
         let artists_url = format!("{}/rest/getArtists?{}", self.url, auth_params);
-
-        match reqwest::get(&artists_url).await {
+        let artist_count = match reqwest::get(&artists_url).await {
             Ok(response) => {
                 if response.status().is_success() {
                     let text = response.text().await.map_err(|e| e.to_string())?;
-
-                    // Simple XML parsing to count artists
-                    let artist_count = text.matches("<artist").count() as u32;
-
-                    Ok(SimpleLibraryStats {
-                        artists: artist_count,
-                        albums: artist_count * 3, // Rough estimate
-                        songs: artist_count * 30, // Rough estimate
-                        source: "navidrome".to_string(),
-                    })
+                    text.matches("<artist").count() as u32
                 } else {
-                    Err(format!("API Error: {}", response.status()))
+                    return Err(format!("Artists API Error: {}", response.status()));
+                }
+            }
+            Err(e) => return Err(format!("Artists request failed: {}", e)),
+        };
+
+        // Get real album count
+        let albums_url = format!(
+            "{}/rest/getAlbumList2?type=alphabeticalByName&size=999999&{}",
+            self.url, auth_params
+        );
+        let album_count = match reqwest::get(&albums_url).await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    let text = response.text().await.map_err(|e| e.to_string())?;
+                    text.matches("<album").count() as u32
+                } else {
+                    // Fallback to estimate if album API fails
+                    artist_count * 2
+                }
+            }
+            Err(_) => artist_count * 2, // Fallback estimate
+        };
+
+        // Get real song count using search with wildcard
+        let songs_url = format!(
+            "{}/rest/search3?query=*&songCount=999999&{}",
+            self.url, auth_params
+        );
+        let song_count = match reqwest::get(&songs_url).await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    let text = response.text().await.map_err(|e| e.to_string())?;
+                    text.matches("<song").count() as u32
+                } else {
+                    // Fallback: try getting random songs to estimate
+                    self.get_song_count_fallback(&auth_params)
+                        .await
+                        .unwrap_or(artist_count * 15)
+                }
+            }
+            Err(_) => {
+                // Fallback: try getting random songs to estimate
+                self.get_song_count_fallback(&auth_params)
+                    .await
+                    .unwrap_or(artist_count * 15)
+            }
+        };
+
+        Ok(SimpleLibraryStats {
+            artists: artist_count,
+            albums: album_count,
+            songs: song_count,
+            source: "navidrome".to_string(),
+        })
+    }
+
+    /// Fallback method to estimate song count using random songs
+    async fn get_song_count_fallback(&self, auth_params: &str) -> Result<u32, String> {
+        // Try to get a large sample of random songs to estimate total
+        let random_url = format!("{}/rest/getRandomSongs?size=1000&{}", self.url, auth_params);
+
+        match reqwest::get(&random_url).await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    let text = response.text().await.map_err(|e| e.to_string())?;
+                    let sample_count = text.matches("<song").count() as u32;
+
+                    // If we got 1000 songs, there are likely more; estimate conservatively
+                    if sample_count >= 1000 {
+                        Ok(sample_count * 2) // Conservative estimate
+                    } else {
+                        Ok(sample_count) // Actual count if less than our sample size
+                    }
+                } else {
+                    Err("Random songs API failed".to_string())
                 }
             }
             Err(e) => Err(e.to_string()),
@@ -242,28 +307,82 @@ impl NavidromeAddon {
         }
     }
 
-    /// Search for tracks in Navidrome library
+    /// Search for tracks in Navidrome library using real search API
     pub async fn search_tracks(&self, query: &str) -> Result<Vec<SimpleTrack>, String> {
         if !self.enabled {
             return Err("Navidrome not configured".to_string());
         }
 
-        // For now, return a subset of random tracks that match the query
-        // In a full implementation, this would use Navidrome's search API
-        match self.get_random_tracks(20).await {
-            Ok(tracks) => {
-                let query_lower = query.to_lowercase();
-                let filtered_tracks: Vec<SimpleTrack> = tracks
-                    .into_iter()
-                    .filter(|track| {
-                        track.title.to_lowercase().contains(&query_lower)
-                            || track.artist.to_lowercase().contains(&query_lower)
-                            || track.album.to_lowercase().contains(&query_lower)
-                    })
-                    .collect();
-                Ok(filtered_tracks)
+        // Create authentication token
+        let salt = "randomsalt";
+        let token = format!("{:x}", md5::compute(format!("{}{}", self.password, salt)));
+
+        // Use Navidrome's search3 API endpoint
+        let auth_params = format!(
+            "u={}&t={}&s={}&v=1.16.1&c=StepheyBot-Music",
+            self.username, token, salt
+        );
+
+        let search_url = format!(
+            "{}/rest/search3?query={}&songCount=50&{}",
+            self.url,
+            urlencoding::encode(query),
+            auth_params
+        );
+
+        match reqwest::get(&search_url).await {
+            Ok(response) => {
+                if response.status().is_success() {
+                    let text = response.text().await.map_err(|e| e.to_string())?;
+
+                    // Parse XML using regex to extract song attributes
+                    let mut tracks = Vec::new();
+
+                    // Look for songs in the search results
+                    let song_regex = Regex::new(r#"<song[^>]+>"#)
+                        .map_err(|e| format!("Song regex error: {}", e))?;
+
+                    for song_match in song_regex.find_iter(&text) {
+                        let song_xml = song_match.as_str();
+
+                        // Extract individual attributes
+                        let id = extract_attribute(song_xml, "id")
+                            .unwrap_or_else(|| format!("unknown_{}", tracks.len()));
+                        let title = extract_attribute(song_xml, "title")
+                            .unwrap_or("Unknown Title".to_string());
+                        let artist = extract_attribute(song_xml, "artist")
+                            .unwrap_or("Unknown Artist".to_string());
+                        let album = extract_attribute(song_xml, "album")
+                            .unwrap_or("Unknown Album".to_string());
+                        let duration_str =
+                            extract_attribute(song_xml, "duration").unwrap_or("0".to_string());
+                        let duration = duration_str.parse::<u32>().unwrap_or(0);
+                        let year =
+                            extract_attribute(song_xml, "year").and_then(|y| y.parse::<u32>().ok());
+                        let genre = extract_attribute(song_xml, "genre");
+
+                        tracks.push(SimpleTrack {
+                            id,
+                            title,
+                            artist,
+                            album,
+                            duration,
+                            year,
+                            genre,
+                        });
+
+                        // Limit results to avoid overwhelming the response
+                        if tracks.len() >= 50 {
+                            break;
+                        }
+                    }
+
+                    Ok(tracks)
+                } else {
+                    Err(format!("Search API Error: {}", response.status()))
+                }
             }
-            Err(e) => Err(format!("Search failed: {}", e)),
+            Err(e) => Err(format!("Search request failed: {}", e)),
         }
     }
 

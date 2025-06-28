@@ -3,6 +3,7 @@
 //! This module contains all the database entity structs that map to the database tables.
 //! These structs are used for database operations and API serialization/deserialization.
 
+use super::generate_id;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -664,10 +665,20 @@ pub struct DownloadRequest {
     pub album_title: Option<String>,
     pub status: String,
     pub source_url: Option<String>,
+    pub magnet_url: Option<String>,
+    pub torrent_hash: Option<String>,
+    pub download_path: Option<String>,
+    pub file_size: Option<u64>,
+    pub progress: Option<f64>,
+    pub download_speed: Option<u64>,
+    pub upload_speed: Option<u64>,
+    pub seeds: Option<i32>,
+    pub peers: Option<i32>,
     pub error_message: Option<String>,
     pub requested_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
+    pub processed_at: Option<DateTime<Utc>>,
     pub track_id: Option<String>,
 }
 
@@ -682,27 +693,78 @@ impl DownloadRequest {
             album_title: None,
             status: "pending".to_string(),
             source_url: None,
+            magnet_url: None,
+            torrent_hash: None,
+            download_path: None,
+            file_size: None,
+            progress: None,
+            download_speed: None,
+            upload_speed: None,
+            seeds: None,
+            peers: None,
             error_message: None,
             requested_at: Utc::now(),
             started_at: None,
             completed_at: None,
+            processed_at: None,
             track_id: None,
         }
     }
 
+    /// Create a new download request with magnet URL
+    pub fn new_with_magnet(
+        user_id: String,
+        artist_name: String,
+        track_title: String,
+        magnet_url: String,
+        torrent_hash: Option<String>,
+    ) -> Self {
+        let mut request = Self::new(user_id, artist_name, track_title);
+        request.magnet_url = Some(magnet_url);
+        request.torrent_hash = torrent_hash;
+        request.status = "queued".to_string();
+        request
+    }
+
     /// Check if download is completed
     pub fn is_completed(&self) -> bool {
-        self.status == "completed" && self.track_id.is_some()
+        self.status == "completed" && self.progress.unwrap_or(0.0) >= 1.0
     }
 
     /// Check if download failed
     pub fn is_failed(&self) -> bool {
-        self.status == "failed"
+        self.status == "failed" || self.status == "error"
     }
 
     /// Check if download is in progress
     pub fn is_in_progress(&self) -> bool {
-        self.status == "downloading"
+        self.status == "downloading" || self.status == "seeding"
+    }
+
+    /// Check if download is queued
+    pub fn is_queued(&self) -> bool {
+        self.status == "queued" || self.status == "pending"
+    }
+
+    /// Get download progress percentage
+    pub fn progress_percentage(&self) -> f64 {
+        (self.progress.unwrap_or(0.0) * 100.0).round()
+    }
+
+    /// Get formatted file size
+    pub fn formatted_file_size(&self) -> String {
+        match self.file_size {
+            Some(size) => Self::format_bytes(size),
+            None => "Unknown".to_string(),
+        }
+    }
+
+    /// Get download speed in human readable format
+    pub fn formatted_download_speed(&self) -> String {
+        match self.download_speed {
+            Some(speed) => format!("{}/s", Self::format_bytes(speed)),
+            None => "0 B/s".to_string(),
+        }
     }
 
     /// Get full track description
@@ -711,6 +773,241 @@ impl DownloadRequest {
             Some(album) => format!("{} - {} ({})", self.artist_name, self.track_title, album),
             None => format!("{} - {}", self.artist_name, self.track_title),
         }
+    }
+
+    /// Update progress from torrent info
+    pub fn update_from_torrent(
+        &mut self,
+        torrent_info: &crate::clients::transmission::TorrentInfo,
+    ) {
+        self.progress = Some(torrent_info.progress);
+        self.file_size = Some(torrent_info.size);
+        self.download_speed = Some(torrent_info.download_speed);
+        self.upload_speed = Some(torrent_info.upload_speed);
+        self.status = torrent_info.status_string().to_string();
+        // Transmission doesn't provide seeds/peers count in basic info
+        // self.seeds and self.peers will remain unchanged
+
+        if torrent_info.progress >= 1.0 && self.completed_at.is_none() {
+            self.completed_at = Some(Utc::now());
+        }
+    }
+
+    /// Helper function to format bytes
+    fn format_bytes(bytes: u64) -> String {
+        const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+        let mut size = bytes as f64;
+        let mut unit_index = 0;
+
+        while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+            size /= 1024.0;
+            unit_index += 1;
+        }
+
+        format!("{:.2} {}", size, UNITS[unit_index])
+    }
+}
+
+/// Active torrent tracking
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TorrentDownload {
+    pub id: String,
+    pub download_request_id: String,
+    pub torrent_hash: String,
+    pub magnet_url: Option<String>,
+    pub name: String,
+    pub save_path: String,
+    pub category: Option<String>,
+    pub status: String,
+    pub progress: f64,
+    pub size: u64,
+    pub downloaded: u64,
+    pub uploaded: u64,
+    pub download_speed: u64,
+    pub upload_speed: u64,
+    pub seeds: i32,
+    pub peers: i32,
+    pub ratio: f64,
+    pub eta: i64,
+    pub added_at: DateTime<Utc>,
+    pub completed_at: Option<DateTime<Utc>>,
+    pub last_updated: DateTime<Utc>,
+}
+
+impl TorrentDownload {
+    /// Create a new torrent download record
+    pub fn new(
+        download_request_id: String,
+        torrent_hash: String,
+        name: String,
+        save_path: String,
+    ) -> Self {
+        Self {
+            id: generate_id(),
+            download_request_id,
+            torrent_hash,
+            magnet_url: None,
+            name,
+            save_path,
+            category: Some("music".to_string()),
+            status: "downloading".to_string(),
+            progress: 0.0,
+            size: 0,
+            downloaded: 0,
+            uploaded: 0,
+            download_speed: 0,
+            upload_speed: 0,
+            seeds: 0,
+            peers: 0,
+            ratio: 0.0,
+            eta: -1,
+            added_at: Utc::now(),
+            completed_at: None,
+            last_updated: Utc::now(),
+        }
+    }
+
+    /// Update from Transmission torrent info
+    pub fn update_from_torrent_info(&mut self, info: &crate::clients::transmission::TorrentInfo) {
+        self.name = info.name.clone();
+        self.progress = info.progress;
+        self.size = info.size;
+        // Transmission doesn't provide downloaded/uploaded bytes in basic info
+        self.download_speed = info.download_speed;
+        self.upload_speed = info.upload_speed;
+        // Transmission doesn't provide seeds/peers count in basic info
+        self.ratio = info.ratio;
+        self.eta = info.eta;
+        self.status = info.status_string().to_string();
+        self.last_updated = Utc::now();
+
+        if info.progress >= 1.0 && self.completed_at.is_none() {
+            self.completed_at = Some(Utc::now());
+        }
+    }
+
+    /// Check if torrent is completed
+    pub fn is_completed(&self) -> bool {
+        self.progress >= 1.0
+    }
+
+    /// Check if torrent is downloading
+    pub fn is_downloading(&self) -> bool {
+        self.status == "downloading" || self.status == "download_pending"
+    }
+
+    /// Check if torrent is seeding
+    pub fn is_seeding(&self) -> bool {
+        self.status == "uploading" || self.status == "stalledUP"
+    }
+
+    /// Get formatted progress percentage
+    pub fn progress_percentage(&self) -> f64 {
+        (self.progress * 100.0).round()
+    }
+
+    /// Get formatted file size
+    pub fn formatted_size(&self) -> String {
+        DownloadRequest::format_bytes(self.size)
+    }
+
+    /// Get formatted download speed
+    pub fn formatted_download_speed(&self) -> String {
+        format!("{}/s", DownloadRequest::format_bytes(self.download_speed))
+    }
+}
+
+/// Individual file within a torrent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadFile {
+    pub id: String,
+    pub torrent_download_id: String,
+    pub file_index: u32,
+    pub file_name: String,
+    pub file_path: String,
+    pub file_size: u64,
+    pub progress: f64,
+    pub priority: i32,
+    pub is_music_file: bool,
+    pub artist_name: Option<String>,
+    pub track_title: Option<String>,
+    pub album_title: Option<String>,
+    pub processed: bool,
+    pub final_path: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub processed_at: Option<DateTime<Utc>>,
+}
+
+impl DownloadFile {
+    /// Create a new download file record
+    pub fn new(
+        torrent_download_id: String,
+        file_index: u32,
+        file_name: String,
+        file_path: String,
+        file_size: u64,
+    ) -> Self {
+        let is_music_file = is_music_file_extension(&file_name);
+
+        Self {
+            id: generate_id(),
+            torrent_download_id,
+            file_index,
+            file_name,
+            file_path,
+            file_size,
+            progress: 0.0,
+            priority: 1,
+            is_music_file,
+            artist_name: None,
+            track_title: None,
+            album_title: None,
+            processed: false,
+            final_path: None,
+            created_at: Utc::now(),
+            processed_at: None,
+        }
+    }
+
+    /// Check if file is completed
+    pub fn is_completed(&self) -> bool {
+        self.progress >= 1.0
+    }
+
+    /// Get formatted file size
+    pub fn formatted_size(&self) -> String {
+        DownloadRequest::format_bytes(self.file_size)
+    }
+
+    /// Get file extension
+    pub fn extension(&self) -> Option<String> {
+        std::path::Path::new(&self.file_name)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_lowercase())
+    }
+
+    /// Mark as processed
+    pub fn mark_processed(&mut self, final_path: String) {
+        self.processed = true;
+        self.final_path = Some(final_path);
+        self.processed_at = Some(Utc::now());
+    }
+}
+
+/// Check if file extension indicates a music file
+fn is_music_file_extension(filename: &str) -> bool {
+    const MUSIC_EXTENSIONS: &[&str] = &[
+        "mp3", "flac", "wav", "ogg", "m4a", "aac", "wma", "ape", "opus", "aiff", "au",
+    ];
+
+    if let Some(ext) = std::path::Path::new(filename)
+        .extension()
+        .and_then(|ext| ext.to_str())
+    {
+        MUSIC_EXTENSIONS.contains(&ext.to_lowercase().as_str())
+    } else {
+        false
     }
 }
 
